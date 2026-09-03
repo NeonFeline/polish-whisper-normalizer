@@ -747,3 +747,16 @@ def test_currency_declined_amounts(normalize, text, expected):
 )
 def test_currency_stray(normalize, text, expected):
     assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("pięć złotówek", "5 zł"),
+        ("dwie złotówki", "2 zł"),
+        ("sto złotówek", "100 zł"),
+        ("jedna złotówka", "1 zł"),
+    ],
+)
+def test_currency_zlotowka(normalize, text, expected):
+    assert normalize(text) == expected

@@ -200,6 +200,7 @@ class PolishNumberNormalizer:
             "złotego": "zł",
             "zł": "zł",
             "pln": "zł",
+            "złotówka": "zł",
             "grosz": "gr",
             "grosze": "gr",
             "groszy": "gr",
@@ -272,6 +273,8 @@ class PolishNumberNormalizer:
 
         self.lemmatizer = PolishLemmatizer()
         self._canon_cache = {}
+        # colloquial currency nouns whose declined forms we canonicalize
+        self.currency_lemmas = {"złotówka"}
 
     def _canonicalize(self, word: str) -> str:
         """Map a declined number word to its base lemma, if it is one."""
@@ -283,7 +286,7 @@ class PolishNumberNormalizer:
         if cached is not None:
             return cached
 
-        candidates = {"num": None, "adj": None, "subst": None}
+        candidates = {"num": None, "adj": None, "subst": None, "currency": None}
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "num" and base in self.cardinal_lemmas:
                 candidates["num"] = base
@@ -291,9 +294,11 @@ class PolishNumberNormalizer:
                 candidates["adj"] = base
             elif pos == "subst" and base in self.multiplier_lemmas:
                 candidates["subst"] = base
+            elif pos == "subst" and base in self.currency_lemmas:
+                candidates["currency"] = base
 
         result = word
-        for key in ("num", "adj", "subst"):
+        for key in ("num", "adj", "subst", "currency"):
             if candidates[key] is not None:
                 result = candidates[key]
                 break

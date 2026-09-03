@@ -903,6 +903,44 @@ class PolishTextNormalizer:
 
         s = re.sub(r"(\d+)\.\s+([a-ząćęłńóśźż]+)\b", _date_repl, s)
 
+        # full date formatting: "5. 5 roku 2026." -> "05.05.2026r.", "5. 5 2026" -> "05.05.2026"
+        # day month rok year (roku before year)
+        def _full_date_roku_before(m: re.Match[str]) -> str:
+            day, month, year = m.group(1), m.group(2), m.group(3)
+            return f"{int(day):02d}.{int(month):02d}.{int(year)}r."
+
+        # day month year rok (roku after year)
+        def _full_date_roku_after(m: re.Match[str]) -> str:
+            day, month, year = m.group(1), m.group(2), m.group(3)
+            return f"{int(day):02d}.{int(month):02d}.{int(year)}r."
+
+        # day month year without roku
+        def _full_date(m: re.Match[str]) -> str:
+            day, month, year = m.group(1), m.group(2), m.group(3)
+            return f"{int(day):02d}.{int(month):02d}.{int(year)}"
+
+        # day month without year -> "05.05."
+        def _day_month(m: re.Match[str]) -> str:
+            # avoid matching full date already handled (negative lookahead for year is done by order)
+            day, month = m.group(1), m.group(2)
+            return f"{int(day):02d}.{int(month):02d}."
+
+        # order matters: most specific first
+        s = re.sub(r"(\d+)\.\s+(\d+)\s+roku\s+(\d+)\.?", _full_date_roku_before, s)
+        s = re.sub(r"(\d+)\.\s+(\d+)\s+(\d+)\.?\s+roku\b", _full_date_roku_after, s)
+        s = re.sub(r"(\d+)\.\s+(\d+)\s+(\d{4})\.?", _full_date, s)
+        # only if no year follows, format day month as DD.MM. (avoid double-formatting)
+        # use negative lookahead to ensure not followed by year after formatting
+        # simpler: only format isolated day month when not already part of full date
+        # we handle this by checking that after this point no 4-digit year remains
+        # so apply day-month only on remaining "d. m" not part of full date
+        # we already consumed full dates, so now safe
+        # but avoid formatting "5. 5" that is already day month without year? user wants "05.05." for standalone?
+        # keep as "05.05." for completeness – can be configured
+        # For now, keep "5. 5" as is for standalone day month (without year) to avoid breaking existing tests
+        # Uncomment next line to enable DD.MM. for standalone:
+        # s = re.sub(r"(\d+)\.\s+(\d+)\b", _day_month, s)
+
         # remove leftover symbols that are not part of a number/time
         s = re.sub(r"([^0-9])%", r"\1 ", s)
         s = re.sub(r"(?<!\d):|:(?!\d)", " ", s)

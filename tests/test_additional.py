@@ -163,7 +163,9 @@ def test_months_genitive_and_lemma(normalize, text, expected):
         ("trzeciego maja", "3. 5"),
         ("dwudziestego pierwszego maja", "21. 5"),
         ("dziewiętnastego grudnia", "19. 12"),
-        ("piątego maja 2023", "5. 5 2023"),  # current spaced output, not 05.05.2023
+        ("piątego maja 2023", "05.05.2023"),
+        ("piątego maja roku dwa tysiące dwudziestego szóstego", "05.05.2026r."),
+        ("piątego maja 2026 roku", "05.05.2026r."),
     ],
 )
 def test_months_with_day(normalize, text, expected):

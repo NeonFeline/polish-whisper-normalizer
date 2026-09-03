@@ -200,6 +200,7 @@ class PolishNumberNormalizer:
             "złotego": "zł",
             "zł": "zł",
             "pln": "zł",
+            "złotówka": "zł",
             "grosz": "gr",
             "grosze": "gr",
             "groszy": "gr",
@@ -269,6 +270,45 @@ class PolishNumberNormalizer:
             | set(self.hundreds_ordinal)
             | set(self.multipliers_ordinal)
         )
+        self.ordinal_values = {
+            **self.ones_ordinal,
+            **self.tens_ordinal,
+            **self.hundreds_ordinal,
+            **self.multipliers_ordinal,
+        }
+
+        # feminine/neuter cardinal forms used as fraction numerators
+        self.fraction_numerators = {
+            "jedna": 1,
+            "dwie": 2,
+            "trzy": 3,
+            "cztery": 4,
+            "pięć": 5,
+            "sześć": 6,
+            "siedem": 7,
+            "osiem": 8,
+            "dziewięć": 9,
+            "dziesięć": 10,
+        }
+        # non-number words whose declined forms we canonicalize
+        self.percent_lemmas = {"procent"}
+        # colloquial currency nouns
+        self.currency_lemmas = {"złotówka"}
+        # month lemmas -> number string (for full-date normalization)
+        self.month_lemmas = {
+            "styczeń": "1",
+            "luty": "2",
+            "marzec": "3",
+            "kwiecień": "4",
+            "maj": "5",
+            "czerwiec": "6",
+            "lipiec": "7",
+            "sierpień": "8",
+            "wrzesień": "9",
+            "październik": "10",
+            "listopad": "11",
+            "grudzień": "12",
+        }
 
         self.lemmatizer = PolishLemmatizer()
         self._canon_cache = {}
@@ -283,7 +323,7 @@ class PolishNumberNormalizer:
         if cached is not None:
             return cached
 
-        candidates = {"num": None, "adj": None, "subst": None}
+        candidates = {"num": None, "adj": None, "subst": None, "percent": None, "currency": None}
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "num" and base in self.cardinal_lemmas:
                 candidates["num"] = base
@@ -291,9 +331,13 @@ class PolishNumberNormalizer:
                 candidates["adj"] = base
             elif pos == "subst" and base in self.multiplier_lemmas:
                 candidates["subst"] = base
+            elif pos == "subst" and base in self.percent_lemmas:
+                candidates["percent"] = base
+            elif pos == "subst" and base in self.currency_lemmas:
+                candidates["currency"] = base
 
         result = word
-        for key in ("num", "adj", "subst"):
+        for key in ("num", "adj", "subst", "percent", "currency"):
             if candidates[key] is not None:
                 result = candidates[key]
                 break
@@ -447,10 +491,19 @@ class PolishNumberNormalizer:
                     else:
                         value = str(value) + str(tens)
             elif current in self.hundreds_ordinal:
-                if value is not None:
-                    yield output(value)
+                # ordinal hundred; composes with a preceding multiplier
+                # ("tysiąc dziewięćsetny" -> "1900.")
+                hundred = self.hundreds_ordinal[current]
                 ordinal = True
-                yield output(self.hundreds_ordinal[current])
+                if value is None:
+                    yield output(hundred)
+                elif isinstance(value, str):
+                    yield output(str(value) + str(hundred))
+                else:
+                    if value % 1000 == 0:
+                        value += hundred
+                    else:
+                        value = str(value) + str(hundred)
             elif current in self.multipliers_ordinal:
                 if value is not None:
                     yield output(value)
@@ -510,6 +563,8 @@ class PolishNumberNormalizer:
         s = re.sub(r"\bi\s+pół\b", "przecinek pięć", s)
         s = re.sub(r"\bpółtora\b", "jeden przecinek pięć", s)
         s = re.sub(r"\bpółtorej\b", "jeden przecinek pięć", s)
+        # standalone "pół" (half) -> "0.5"
+        s = re.sub(r"\bpół\b", "zero przecinek pięć", s)
 
         # normalize currency symbols to follow the amount ("€10" -> "10 €",
         # "10€" -> "10 €", "$1.50" -> "1.50 $")
@@ -525,9 +580,36 @@ class PolishNumberNormalizer:
     def postprocess(self, s: str):
         return s
 
+    def _fraction_denominator(self, word: str):
+        """Return the ordinal value of `word` if it is a fraction denominator."""
+        for base, pos in self.lemmatizer.analyse(word):
+            if pos == "adj" and base in self.ordinal_values:
+                value = self.ordinal_values[base]
+                if value >= 2:
+                    return value
+        return None
+
+    def _convert_fractions(self, words: List[str]) -> List[str]:
+        """Turn "jedna trzecia" -> "1/3", "trzy czwarte" -> "3/4", etc."""
+        result = []
+        i = 0
+        n = len(words)
+        while i < n:
+            numerator = self.fraction_numerators.get(words[i])
+            if numerator is not None and i + 1 < n:
+                denominator = self._fraction_denominator(words[i + 1])
+                if denominator is not None:
+                    result.append(f"{numerator}/{denominator}")
+                    i += 2
+                    continue
+            result.append(words[i])
+            i += 1
+        return result
+
     def __call__(self, s: str):
         s = self.preprocess(s)
-        words = [self._canonicalize(w) for w in s.split()]
+        words = self._convert_fractions(s.split())
+        words = [self._canonicalize(w) for w in words]
         s = " ".join(word for word in self.process_words(words) if word is not None)
         s = self.postprocess(s)
         return s
@@ -624,6 +706,26 @@ class PolishTimeNormalizer:
         self._re_hour_gen_min = re.compile(
             r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b"
         )
+        # "o piątej" -> "o 5:00" (genitive hour, not followed by a word)
+        self._re_o_hour = re.compile(
+            r"\bo\s+(" + hours_gen_alt + r")\b(?!\s*[a-ząćęłńóśźż])"
+        )
+        # hour + time-of-day marker ("piąta rano" -> "5:00 rano")
+        self._re_hour_rano = re.compile(r"\b(" + hours_alt + r")\s+rano\b")
+        self._re_o_hour_rano = re.compile(
+            r"\bo\s+(" + hours_gen_alt + r")\s+rano\b"
+        )
+        # variants with an explicit "minut(ę/y)" word
+        self._re_za_minut = re.compile(
+            r"\bza\s+(" + minutes_alt + r")\s+minut(?:a|ę|y)?\s+(" + hours_alt + r")\b"
+        )
+        self._re_po_minut = re.compile(
+            r"\b(" + minutes_alt + r")\s+minut(?:a|ę|y)?\s+po\s+(" + hours_gen_alt + r")\b"
+        )
+        # "od piątej do szóstej" -> "od 5:00 do 6:00"
+        self._re_range = re.compile(
+            r"\bod\s+(" + hours_gen_alt + r")\s+do\s+(" + hours_gen_alt + r")\b"
+        )
 
     @staticmethod
     def _ones_words() -> List[str]:
@@ -683,6 +785,9 @@ class PolishTimeNormalizer:
         for d in range(10):
             minutes["zero " + ones[d]] = d
         minutes.update(kwadrans)
+        # feminine cardinal forms used with "minuta/minuty"
+        minutes["jedna"] = 1
+        minutes["dwie"] = 2
         return minutes
 
     @staticmethod
@@ -697,12 +802,19 @@ class PolishTimeNormalizer:
         s = self._re_wpol.sub(
             lambda m: f"{(self.hours_gen[m.group(1)] - 1) % 24}:30", s
         )
+        # handle "o piątej rano" and "piąta rano" before generic "o piątej"
+        s = self._re_o_hour_rano.sub(self._o_hour_rano_repl, s)
+        s = self._re_hour_rano.sub(self._hour_rano_repl, s)
         s = self._re_za.sub(self._za_repl, s)
         s = self._re_po.sub(self._po_repl, s)
         s = self._re_godzina_min.sub(self._godzina_min_repl, s)
         s = self._re_godzina.sub(self._godzina_repl, s)
         s = self._re_hour_min.sub(self._hour_min_repl, s)
         s = self._re_hour_gen_min.sub(self._hour_gen_min_repl, s)
+        s = self._re_o_hour.sub(self._o_hour_repl, s)
+        s = self._re_za_minut.sub(self._za_repl, s)
+        s = self._re_po_minut.sub(self._po_repl, s)
+        s = self._re_range.sub(self._range_repl, s)
         return s
 
     def _za_repl(self, m: Match) -> str:
@@ -735,6 +847,23 @@ class PolishTimeNormalizer:
         hour = self.hours_gen[m.group(1)]
         minute = self.minutes[m.group(2)]
         return f"{hour}:{minute:02d}"
+
+    def _o_hour_repl(self, m: Match) -> str:
+        hour = self.hours_gen[m.group(1)]
+        return f"o {hour}:00"
+
+    def _o_hour_rano_repl(self, m: Match) -> str:
+        hour = self.hours_gen[m.group(1)]
+        return f"o {hour}:00 rano"
+
+    def _hour_rano_repl(self, m: Match) -> str:
+        hour = self.hours[m.group(1)]
+        return f"{hour}:00 rano"
+
+    def _range_repl(self, m: Match) -> str:
+        start = self.hours_gen[m.group(1)]
+        end = self.hours_gen[m.group(2)]
+        return f"od {start}:00 do {end}:00"
 
 
 class PolishTextNormalizer:

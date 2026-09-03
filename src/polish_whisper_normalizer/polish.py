@@ -510,6 +510,8 @@ class PolishNumberNormalizer:
         s = re.sub(r"\bi\s+pół\b", "przecinek pięć", s)
         s = re.sub(r"\bpółtora\b", "jeden przecinek pięć", s)
         s = re.sub(r"\bpółtorej\b", "jeden przecinek pięć", s)
+        # standalone "pół" (half) -> "0.5"
+        s = re.sub(r"\bpół\b", "zero przecinek pięć", s)
 
         # normalize currency symbols to follow the amount ("€10" -> "10 €",
         # "10€" -> "10 €", "$1.50" -> "1.50 $")

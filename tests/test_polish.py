@@ -359,6 +359,23 @@ def test_fractions(normalize, text, expected):
     assert normalize(text) == expected
 
 
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # standalone "pół" -> "0.5"
+        ("pół litra", "0.5 litra"),
+        ("pół godziny", "0.5 godziny"),
+        ("pół kilo", "0.5 kilo"),
+        # compounds are not touched
+        ("północ", "0:00"),
+        ("półmetek", "półmetek"),
+        ("wpół do ósmej", "7:30"),
+    ],
+)
+def test_half(normalize, text, expected):
+    assert normalize(text) == expected
+
+
 # ---------------------------------------------------------------------------
 # Currency, percent, signs
 # ---------------------------------------------------------------------------

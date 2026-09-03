@@ -791,8 +791,25 @@ class PolishTimeNormalizer:
         return "|".join(re.escape(k) for k in keys)
 
     def __call__(self, s: str) -> str:
+        # protect geographic "na północ/południe" (south/north) – keep as words
+        # only convert time midnight/noon when not geographic
+        _geo_map: dict[str, str] = {}
+
+        def _protect_geo(m: re.Match[str]) -> str:
+            key = f"__GEO_{len(_geo_map)}__"
+            _geo_map[key] = m.group(0)
+            return key
+
+        # geographic prepositions + północ/południe should stay
+        s = re.sub(
+            r"\b(na|z|od|do|w|ku|kierunek|strona|część|północno|południowo)\s+(północ|południe)\b",
+            _protect_geo,
+            s,
+        )
         s = re.sub(r"\bpółnoc\b", "0:00", s)
         s = re.sub(r"\bpołudnie\b", "12:00", s)
+        for k, v in _geo_map.items():
+            s = s.replace(k, v)
 
         s = self._re_wpol.sub(lambda m: f"{(self.hours_gen[m.group(1)] - 1) % 24}:30", s)
         # handle "o piątej rano" and "piąta rano" before generic "o piątej"
@@ -860,10 +877,40 @@ class PolishTimeNormalizer:
 
 
 class PolishTextNormalizer:
-    def __init__(self) -> None:
+    def __init__(
+        self, date_format: str = "{day:02d}.{month:02d}.{year}", **kwargs: object
+    ) -> None:
+        """
+        Args:
+            date_format: How to render full dates (day month year). Supports
+                Python format with {day}, {month}, {year} (e.g. "{day:02d}.{month:02d}.{year}"
+                or "{day}/{month}/{year}") and strftime with %d/%m/%Y
+                (e.g. "%d.%m.%Y", "%Y-%m-%d", "%d.%m.%Yr.").
+                Default "{day:02d}.{month:02d}.{year}" -> "05.05.2026".
+        """
         self.ignore_patterns = r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b"
         self.standardize_numbers = PolishNumberNormalizer()
         self.standardize_time = PolishTimeNormalizer()
+        self.date_format: str = date_format
+        # keep for backwards compat if passed via kwargs
+        if "date_format" in kwargs and isinstance(kwargs["date_format"], str):
+            self.date_format = kwargs["date_format"]
+
+    def _format_date(self, day: int, month: int, year: int) -> str:
+        fmt = self.date_format
+        if "%" in fmt:
+            # strftime path
+            try:
+                import datetime
+
+                return datetime.datetime(year, month, day).strftime(fmt)
+            except Exception:
+                pass
+        # format string with {day}, {month}, {year}
+        try:
+            return fmt.format(day=day, month=month, year=year)
+        except Exception:
+            return f"{day:02d}.{month:02d}.{year}"
 
     def _month_number(self, word: str) -> str | None:
         for base, pos in self.standardize_numbers.lemmatizer.analyse(word):
@@ -907,17 +954,17 @@ class PolishTextNormalizer:
         # day month rok year (roku before year)
         def _full_date_roku_before(m: re.Match[str]) -> str:
             day, month, year = m.group(1), m.group(2), m.group(3)
-            return f"{int(day):02d}.{int(month):02d}.{int(year)}"
+            return self._format_date(int(day), int(month), int(year))
 
         # day month year rok (roku after year)
         def _full_date_roku_after(m: re.Match[str]) -> str:
             day, month, year = m.group(1), m.group(2), m.group(3)
-            return f"{int(day):02d}.{int(month):02d}.{int(year)}"
+            return self._format_date(int(day), int(month), int(year))
 
         # day month year without roku
         def _full_date(m: re.Match[str]) -> str:
             day, month, year = m.group(1), m.group(2), m.group(3)
-            return f"{int(day):02d}.{int(month):02d}.{int(year)}"
+            return self._format_date(int(day), int(month), int(year))
 
         # day month without year -> "05.05."
         def _day_month(m: re.Match[str]) -> str:
@@ -925,13 +972,19 @@ class PolishTextNormalizer:
             day, month = m.group(1), m.group(2)
             return f"{int(day):02d}.{int(month):02d}."
 
-        # order matters: most specific first (handle roku and r. uniformly, no suffix in output)
+        # order matters: most specific first (handle roku and r. uniformly)
         s = re.sub(r"(\d+)\.\s+(\d+)\s+(?:roku|r\.?)\s+(\d+)\.?", _full_date_roku_before, s)
         s = re.sub(r"(\d+)\.\s+(\d+)\s+(\d+)\.?\s+(?:roku|r\.?)\b", _full_date_roku_after, s)
         s = re.sub(r"(\d+)\.\s+(\d+)\s+(\d{4})\.?", _full_date, s)
-        # remove trailing r/r. after already formatted date (for uniform output)
-        s = re.sub(r"(\d{2}\.\d{2}\.\d{4})\s+r\.?\b", r"\1", s)
-        s = re.sub(r"(\d{2}\.\d{2}\.\d{4})r\.?\b", r"\1", s)
+        # uniform output: strip trailing r/r. only if date_format does not request it
+        _wants_r = (
+            self.date_format.strip().lower().endswith("r.")
+            or self.date_format.strip().lower().endswith(" r")
+            or " r." in self.date_format.lower()
+        )
+        if not _wants_r:
+            s = re.sub(r"(\d{2}\.\d{2}\.\d{4})\s+r\.?\b", r"\1", s)
+            s = re.sub(r"(\d{2}\.\d{2}\.\d{4})r\.?\b", r"\1", s)
         # only if no year follows, format day month as DD.MM. (avoid double-formatting)
         # use negative lookahead to ensure not followed by year after formatting
         # simpler: only format isolated day month when not already part of full date

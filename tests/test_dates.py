@@ -1,4 +1,5 @@
 import pytest
+
 from polish_whisper_normalizer import PolishTextNormalizer
 
 

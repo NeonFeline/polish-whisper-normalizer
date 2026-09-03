@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import re
+from collections.abc import Iterator
 from fractions import Fraction
-from typing import Iterator, List, Match, Optional, Union
+from typing import Any
 
 from more_itertools import windowed
 
@@ -14,12 +17,12 @@ class PolishLemmatizer:
     gracefully and simply returns no analyses.
     """
 
-    def __init__(self):
-        self._morf = None
-        self._cache = {}
+    def __init__(self) -> None:
+        self._morf: object | None = None
+        self._cache: dict[str, list[tuple[str, str]]] = {}
 
     @property
-    def morf(self):
+    def morf(self) -> Any | None:
         if self._morf is None:
             try:
                 import morfeusz2
@@ -29,7 +32,7 @@ class PolishLemmatizer:
                 self._morf = False
         return self._morf if self._morf is not False else None
 
-    def analyse(self, word: str):
+    def analyse(self, word: str) -> list[tuple[str, str]]:
         """Return a list of (base_lemma, part_of_speech) tuples."""
         morf = self.morf
         if morf is None:
@@ -38,7 +41,7 @@ class PolishLemmatizer:
             return self._cache[word]
         results = []
         try:
-            for analysis in morf.analyse(word):
+            for analysis in morf.analyse(word):  # type: ignore[union-attr]
                 if len(analysis) == 3 and isinstance(analysis[2], tuple):
                     datum = analysis[2]
                     lemma, morph = datum[1], datum[2]
@@ -66,7 +69,7 @@ class PolishNumberNormalizer:
     - declined cardinal forms ("pięciu" -> "5", "dwóm" -> "2", "tysiąca" -> "1000")
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.zeros = {"zero"}
@@ -238,28 +241,26 @@ class PolishNumberNormalizer:
         self.conjunctions = {"i"}
         self.prefixes = set(self.preceding_prefixers.values())
 
-        self.words = set(
-            [
-                key
-                for mapping in [
-                    self.zeros,
-                    self.ones,
-                    self.tens,
-                    self.hundreds,
-                    self.multipliers,
-                    self.ones_ordinal,
-                    self.tens_ordinal,
-                    self.hundreds_ordinal,
-                    self.multipliers_ordinal,
-                    self.preceding_prefixers,
-                    self.currencies,
-                    self.suffixers,
-                    self.specials,
-                    self.conjunctions,
-                ]
-                for key in mapping
+        self.words = {
+            key
+            for mapping in [
+                self.zeros,
+                self.ones,
+                self.tens,
+                self.hundreds,
+                self.multipliers,
+                self.ones_ordinal,
+                self.tens_ordinal,
+                self.hundreds_ordinal,
+                self.multipliers_ordinal,
+                self.preceding_prefixers,
+                self.currencies,
+                self.suffixers,
+                self.specials,
+                self.conjunctions,
             ]
-        )
+            for key in mapping
+        }
 
         # lemma -> value lookups used to canonicalize declined forms
         self.cardinal_lemmas = set(self.ones) | set(self.tens) | set(self.hundreds)
@@ -311,7 +312,7 @@ class PolishNumberNormalizer:
         }
 
         self.lemmatizer = PolishLemmatizer()
-        self._canon_cache = {}
+        self._canon_cache: dict[str, str] = {}
 
     def _canonicalize(self, word: str) -> str:
         """Map a declined number word to its base lemma, if it is one."""
@@ -323,7 +324,13 @@ class PolishNumberNormalizer:
         if cached is not None:
             return cached
 
-        candidates = {"num": None, "adj": None, "subst": None, "percent": None, "currency": None}
+        candidates: dict[str, str | None] = {
+            "num": None,
+            "adj": None,
+            "subst": None,
+            "percent": None,
+            "currency": None,
+        }
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "num" and base in self.cardinal_lemmas:
                 candidates["num"] = base
@@ -339,31 +346,31 @@ class PolishNumberNormalizer:
         result = word
         for key in ("num", "adj", "subst", "percent", "currency"):
             if candidates[key] is not None:
-                result = candidates[key]
+                result = candidates[key]  # type: ignore[assignment]
                 break
         self._canon_cache[word] = result
         return result
 
-    def process_words(self, words: List[str]) -> Iterator[str]:
-        prefix: Optional[str] = None
-        value: Optional[Union[str, int]] = None
+    def process_words(self, words: list[str]) -> Iterator[str]:
+        prefix: str | None = None
+        value: str | int | None = None
         ordinal = False
         skip = False
 
-        def to_fraction(s: str):
+        def to_fraction(s: str) -> Fraction | None:
             try:
                 return Fraction(s)
             except ValueError:
                 return None
 
-        def output(result: Union[str, int]):
+        def output(result: str | int) -> str:
             nonlocal prefix, value, ordinal
             result = str(result)
             if prefix is not None:
                 result = prefix + result
             if ordinal:
                 result += "."
-            value = None
+            value = None  # type: ignore[assignment]
             prefix = None
             ordinal = False
             return result
@@ -376,22 +383,22 @@ class PolishNumberNormalizer:
                 skip = False
                 continue
 
-            next_is_numeric = next is not None and re.match(r"^\d+(\.\d+)?$", next)
-            has_prefix = current[0] in self.prefixes
-            current_without_prefix = current[1:] if has_prefix else current
+            next_is_numeric = next is not None and re.match(r"^\d+(\.\d+)?$", next)  # type: ignore[arg-type]
+            has_prefix = current[0] in self.prefixes  # type: ignore[index]
+            current_without_prefix = current[1:] if has_prefix else current  # type: ignore[index]
 
-            if re.match(r"^\d+(\.\d+)?$", current_without_prefix):
+            if re.match(r"^\d+(\.\d+)?$", current_without_prefix):  # type: ignore[arg-type]
                 # arabic numbers (potentially with signs/currency prefixes)
-                f = to_fraction(current_without_prefix)
+                f = to_fraction(current_without_prefix)  # type: ignore[arg-type]
                 assert f is not None
                 if value is not None:
                     if isinstance(value, str) and value.endswith("."):
                         value = str(value) + str(current)
                         continue
                     else:
-                        yield output(value)
+                        yield output(value)  # type: ignore[arg-type]
 
-                prefix = current[0] if has_prefix else prefix
+                prefix = current[0] if has_prefix else prefix  # type: ignore[index]
                 if f.denominator == 1:
                     value = f.numerator
                 else:
@@ -399,8 +406,8 @@ class PolishNumberNormalizer:
             elif current not in self.words:
                 # non-numeric words
                 if value is not None:
-                    yield output(value)
-                yield output(current)
+                    yield output(value)  # type: ignore[arg-type]
+                yield output(current)  # type: ignore[arg-type]
             elif current in self.zeros:
                 value = str(value or "") + "0"
             elif current in self.ones:
@@ -409,8 +416,8 @@ class PolishNumberNormalizer:
                     value = ones
                 elif isinstance(value, str) or prev in self.ones:
                     if prev in self.tens and ones < 10:
-                        assert value[-1] == "0"
-                        value = value[:-1] + str(ones)
+                        assert value[-1] == "0"  # type: ignore[index]
+                        value = value[:-1] + str(ones)  # type: ignore[index, union-attr]
                     else:
                         value = str(value) + str(ones)
                 elif ones < 10:
@@ -450,12 +457,12 @@ class PolishNumberNormalizer:
                 if value is None:
                     value = multiplier
                 elif isinstance(value, str) or value == 0:
-                    f = to_fraction(value)
-                    p = f * multiplier if f is not None else None
-                    if f is not None and p.denominator == 1:
-                        value = p.numerator
+                    f = to_fraction(str(value))  # type: ignore[arg-type]
+                    p = f * multiplier if f is not None else None  # type: ignore[operator]
+                    if f is not None and p.denominator == 1:  # type: ignore[union-attr]
+                        value = p.numerator  # type: ignore[union-attr]
                     else:
-                        yield output(value)
+                        yield output(value)  # type: ignore[arg-type]
                         value = multiplier
                 else:
                     before = value // 1000 * 1000
@@ -506,38 +513,38 @@ class PolishNumberNormalizer:
                         value = str(value) + str(hundred)
             elif current in self.multipliers_ordinal:
                 if value is not None:
-                    yield output(value)
+                    yield output(value)  # type: ignore[arg-type]
                 ordinal = True
                 yield output(self.multipliers_ordinal[current])
             elif current in self.preceding_prefixers:
                 # apply prefix (minus, plus, etc.) if it precedes a number
                 if value is not None:
-                    yield output(value)
+                    yield output(value)  # type: ignore[arg-type]
                 if next in self.words or next_is_numeric:
                     prefix = self.preceding_prefixers[current]
                 else:
-                    yield output(current)
+                    yield output(current)  # type: ignore[arg-type]
             elif current in self.currencies:
                 # currency word/abbreviation follows the amount -> suffix
                 if value is not None:
                     yield output(str(value) + " " + self.currencies[current])
                 elif current.isalpha():
-                    yield output(current)
+                    yield output(current)  # type: ignore[arg-type]
                 # else: stray currency symbol with no amount -> drop
             elif current in self.suffixers:
                 # apply suffix symbols (procent -> '%')
                 if value is not None:
                     yield output(str(value) + self.suffixers[current])
                 else:
-                    yield output(current)
+                    yield output(current)  # type: ignore[arg-type]
             elif current in self.specials:
                 # decimal separators ("przecinek", "kropka")
                 if next in self.decimals or next_is_numeric:
                     value = str(value or "") + "."
                 else:
                     if value is not None:
-                        yield output(value)
-                    yield output(current)
+                        yield output(value)  # type: ignore[arg-type]
+                    yield output(current)  # type: ignore[arg-type]
             elif current in self.conjunctions:
                 # drop "i" only when it joins two numeric tokens
                 # (e.g. "sto złotych i pięćdziesiąt groszy" -> "100 zł 50 gr")
@@ -547,18 +554,18 @@ class PolishNumberNormalizer:
                 next_numeric = next in self.words or next_is_numeric
                 if prev_numeric and next_numeric:
                     if value is not None:
-                        yield output(value)
+                        yield output(value)  # type: ignore[arg-type]
                 else:
                     if value is not None:
-                        yield output(value)
-                    yield output(current)
+                        yield output(value)  # type: ignore[arg-type]
+                    yield output(current)  # type: ignore[arg-type]
             else:
                 raise ValueError(f"Unexpected token: {current}")
 
         if value is not None:
             yield output(value)
 
-    def preprocess(self, s: str):
+    def preprocess(self, s: str) -> str:
         # "i pół" -> "przecinek pięć" (two and a half -> 2.5)
         s = re.sub(r"\bi\s+pół\b", "przecinek pięć", s)
         s = re.sub(r"\bpółtora\b", "jeden przecinek pięć", s)
@@ -577,10 +584,10 @@ class PolishNumberNormalizer:
 
         return s
 
-    def postprocess(self, s: str):
+    def postprocess(self, s: str) -> str:
         return s
 
-    def _fraction_denominator(self, word: str):
+    def _fraction_denominator(self, word: str) -> int | None:
         """Return the ordinal value of `word` if it is a fraction denominator."""
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "adj" and base in self.ordinal_values:
@@ -589,7 +596,7 @@ class PolishNumberNormalizer:
                     return value
         return None
 
-    def _convert_fractions(self, words: List[str]) -> List[str]:
+    def _convert_fractions(self, words: list[str]) -> list[str]:
         """Turn "jedna trzecia" -> "1/3", "trzy czwarte" -> "3/4", etc."""
         result = []
         i = 0
@@ -606,7 +613,7 @@ class PolishNumberNormalizer:
             i += 1
         return result
 
-    def __call__(self, s: str):
+    def __call__(self, s: str) -> str:
         s = self.preprocess(s)
         words = self._convert_fractions(s.split())
         words = [self._canonicalize(w) for w in words]
@@ -628,7 +635,7 @@ class PolishTimeNormalizer:
     - "północ" -> "0:00", "południe" -> "12:00"
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         self.hours = {
@@ -690,31 +697,19 @@ class PolishTimeNormalizer:
         minutes_alt = self._alternation(self.minutes)
 
         self._re_wpol = re.compile(r"\bwpół\s+do\s+(" + hours_gen_alt + r")\b")
-        self._re_za = re.compile(
-            r"\bza\s+(" + minutes_alt + r")\s+(" + hours_alt + r")\b"
-        )
-        self._re_po = re.compile(
-            r"\b(" + minutes_alt + r")\s+po\s+(" + hours_gen_alt + r")\b"
-        )
+        self._re_za = re.compile(r"\bza\s+(" + minutes_alt + r")\s+(" + hours_alt + r")\b")
+        self._re_po = re.compile(r"\b(" + minutes_alt + r")\s+po\s+(" + hours_gen_alt + r")\b")
         self._re_godzina_min = re.compile(
             r"\bgodzina\s+(" + hours_alt + r")\s+(" + minutes_alt + r")\b"
         )
         self._re_godzina = re.compile(r"\bgodzina\s+(" + hours_alt + r")\b")
-        self._re_hour_min = re.compile(
-            r"\b(" + hours_alt + r")\s+(" + minutes_alt + r")\b"
-        )
-        self._re_hour_gen_min = re.compile(
-            r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b"
-        )
+        self._re_hour_min = re.compile(r"\b(" + hours_alt + r")\s+(" + minutes_alt + r")\b")
+        self._re_hour_gen_min = re.compile(r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b")
         # "o piątej" -> "o 5:00" (genitive hour, not followed by a word)
-        self._re_o_hour = re.compile(
-            r"\bo\s+(" + hours_gen_alt + r")\b(?!\s*[a-ząćęłńóśźż])"
-        )
+        self._re_o_hour = re.compile(r"\bo\s+(" + hours_gen_alt + r")\b(?!\s*[a-ząćęłńóśźż])")
         # hour + time-of-day marker ("piąta rano" -> "5:00 rano")
         self._re_hour_rano = re.compile(r"\b(" + hours_alt + r")\s+rano\b")
-        self._re_o_hour_rano = re.compile(
-            r"\bo\s+(" + hours_gen_alt + r")\s+rano\b"
-        )
+        self._re_o_hour_rano = re.compile(r"\bo\s+(" + hours_gen_alt + r")\s+rano\b")
         # variants with an explicit "minut(ę/y)" word
         self._re_za_minut = re.compile(
             r"\bza\s+(" + minutes_alt + r")\s+minut(?:a|ę|y)?\s+(" + hours_alt + r")\b"
@@ -728,7 +723,7 @@ class PolishTimeNormalizer:
         )
 
     @staticmethod
-    def _ones_words() -> List[str]:
+    def _ones_words() -> list[str]:
         return [
             "zero",
             "jeden",
@@ -742,7 +737,7 @@ class PolishTimeNormalizer:
             "dziewięć",
         ]
 
-    def _build_minutes(self):
+    def _build_minutes(self) -> dict[str, int]:
         ones = self._ones_words()
         teens = {
             10: "dziesięć",
@@ -791,17 +786,15 @@ class PolishTimeNormalizer:
         return minutes
 
     @staticmethod
-    def _alternation(mapping) -> str:
+    def _alternation(mapping: dict[str, int]) -> str:
         keys = sorted(mapping.keys(), key=lambda w: (-len(w), -w.count(" ")))
         return "|".join(re.escape(k) for k in keys)
 
-    def __call__(self, s: str):
+    def __call__(self, s: str) -> str:
         s = re.sub(r"\bpółnoc\b", "0:00", s)
         s = re.sub(r"\bpołudnie\b", "12:00", s)
 
-        s = self._re_wpol.sub(
-            lambda m: f"{(self.hours_gen[m.group(1)] - 1) % 24}:30", s
-        )
+        s = self._re_wpol.sub(lambda m: f"{(self.hours_gen[m.group(1)] - 1) % 24}:30", s)
         # handle "o piątej rano" and "piąta rano" before generic "o piątej"
         s = self._re_o_hour_rano.sub(self._o_hour_rano_repl, s)
         s = self._re_hour_rano.sub(self._hour_rano_repl, s)
@@ -817,68 +810,68 @@ class PolishTimeNormalizer:
         s = self._re_range.sub(self._range_repl, s)
         return s
 
-    def _za_repl(self, m: Match) -> str:
+    def _za_repl(self, m: re.Match[str]) -> str:
         minute = self.minutes[m.group(1)]
         hour = self.hours[m.group(2)]
         if minute <= 0 or minute >= 60:
             return m.group(0)
         return f"{(hour - 1) % 24}:{60 - minute:02d}"
 
-    def _po_repl(self, m: Match) -> str:
+    def _po_repl(self, m: re.Match[str]) -> str:
         minute = self.minutes[m.group(1)]
         hour = self.hours_gen[m.group(2)]
         return f"{hour}:{minute:02d}"
 
-    def _godzina_min_repl(self, m: Match) -> str:
+    def _godzina_min_repl(self, m: re.Match[str]) -> str:
         hour = self.hours[m.group(1)]
         minute = self.minutes[m.group(2)]
         return f"{hour}:{minute:02d}"
 
-    def _godzina_repl(self, m: Match) -> str:
+    def _godzina_repl(self, m: re.Match[str]) -> str:
         hour = self.hours[m.group(1)]
         return f"{hour}:00"
 
-    def _hour_min_repl(self, m: Match) -> str:
+    def _hour_min_repl(self, m: re.Match[str]) -> str:
         hour = self.hours[m.group(1)]
         minute = self.minutes[m.group(2)]
         return f"{hour}:{minute:02d}"
 
-    def _hour_gen_min_repl(self, m: Match) -> str:
+    def _hour_gen_min_repl(self, m: re.Match[str]) -> str:
         hour = self.hours_gen[m.group(1)]
         minute = self.minutes[m.group(2)]
         return f"{hour}:{minute:02d}"
 
-    def _o_hour_repl(self, m: Match) -> str:
+    def _o_hour_repl(self, m: re.Match[str]) -> str:
         hour = self.hours_gen[m.group(1)]
         return f"o {hour}:00"
 
-    def _o_hour_rano_repl(self, m: Match) -> str:
+    def _o_hour_rano_repl(self, m: re.Match[str]) -> str:
         hour = self.hours_gen[m.group(1)]
         return f"o {hour}:00 rano"
 
-    def _hour_rano_repl(self, m: Match) -> str:
+    def _hour_rano_repl(self, m: re.Match[str]) -> str:
         hour = self.hours[m.group(1)]
         return f"{hour}:00 rano"
 
-    def _range_repl(self, m: Match) -> str:
+    def _range_repl(self, m: re.Match[str]) -> str:
         start = self.hours_gen[m.group(1)]
         end = self.hours_gen[m.group(2)]
         return f"od {start}:00 do {end}:00"
 
 
 class PolishTextNormalizer:
-    def __init__(self):
+    def __init__(self) -> None:
         self.ignore_patterns = r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b"
         self.standardize_numbers = PolishNumberNormalizer()
         self.standardize_time = PolishTimeNormalizer()
 
-    def _month_number(self, word: str) -> Optional[str]:
+    def _month_number(self, word: str) -> str | None:
         for base, pos in self.standardize_numbers.lemmatizer.analyse(word):
             if pos == "subst" and base in self.standardize_numbers.month_lemmas:
                 return self.standardize_numbers.month_lemmas[base]
         return None
 
-    def __call__(self, s: str):
+    def __call__(self, s: str) -> str:
         s = s.lower()
 
         s = re.sub(r"[<\[][^>\]]*[>\]]", "", s)  # remove words between brackets
@@ -892,13 +885,15 @@ class PolishTextNormalizer:
         s = self.standardize_time(s)
 
         s = re.sub(r"(\d),(\d)", r"\1.\2", s)  # Polish decimal comma -> point
-        s = remove_symbols(s, keep=".:/%$€£¢+-")  # keep numeric/time/sign/currency symbols + fraction slash
+        s = remove_symbols(
+            s, keep=".:/%$€£¢+-"
+        )  # keep numeric/time/sign/currency symbols + fraction slash
 
         s = self.standardize_numbers(s)
 
         # conditional month mapping: only when preceded by day ordinal
         # ("3. maja" -> "3. 5", but "maja" alone or "w maju" stays)
-        def _date_repl(m: Match) -> str:
+        def _date_repl(m: re.Match[str]) -> str:
             day = m.group(1)
             month_word = m.group(2)
             month_num = self._month_number(month_word)

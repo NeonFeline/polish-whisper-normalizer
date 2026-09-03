@@ -134,10 +134,7 @@ def test_punctuation_and_fillers(normalize, text, expected):
 
 
 def test_full_sentence(normalize):
-    assert (
-        normalize("Było piętnaście po piątej, minus dziesięć stopni.")
-        == "było 5:15 -10 stopni"
-    )
+    assert normalize("Było piętnaście po piątej, minus dziesięć stopni.") == "było 5:15 -10 stopni"
 
 
 def test_arabic_numbers_passthrough(normalize):
@@ -222,6 +219,7 @@ def test_non_number_words_untouched(normalize):
 # ---------------------------------------------------------------------------
 # Cardinal numbers, exhaustive units/tens/hundreds
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "text, expected",
@@ -327,6 +325,7 @@ def test_cardinal_long_scale(normalize, text, expected):
 # Decimals and fractions
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "text, expected",
     [
@@ -362,6 +361,7 @@ def test_fractions(normalize, text, expected):
 # ---------------------------------------------------------------------------
 # Currency, percent, signs
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "text, expected",
@@ -415,6 +415,7 @@ def test_signs(normalize, text, expected):
 # Declension (cardinals)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "text, expected",
     [
@@ -451,6 +452,7 @@ def test_declined_cardinals_more(normalize, text, expected):
 # ---------------------------------------------------------------------------
 # Declension (ordinals) — cases and genders
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "text, expected",
@@ -536,6 +538,7 @@ def test_compound_ordinals(normalize, text, expected):
 # Robustness: whitespace, idempotency, symbols
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "text, expected",
     [
@@ -584,6 +587,7 @@ def test_arabic_and_symbols_passthrough(normalize, text, expected):
 # Conjunction handling
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "text, expected",
     [
@@ -600,6 +604,7 @@ def test_conjunction_i(normalize, text, expected):
 # ---------------------------------------------------------------------------
 # Full sentences
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "text, expected",
@@ -626,6 +631,7 @@ def test_full_sentences(normalize, text, expected):
 # ---------------------------------------------------------------------------
 # Component isolation / unit tests
 # ---------------------------------------------------------------------------
+
 
 def test_number_normalizer_direct():
     n = PolishNumberNormalizer()
@@ -660,6 +666,7 @@ def test_basic_normalizer_variants():
 # ---------------------------------------------------------------------------
 # Currencies: words, ISO codes, and symbols
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "text, expected",

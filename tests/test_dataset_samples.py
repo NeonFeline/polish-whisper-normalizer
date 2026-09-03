@@ -16,12 +16,12 @@ def normalize():
         # BIGOS – Clarin Studio date (conditional month)
         (
             "na tę wiadomość napoleon postanawia ruszyć niezwłocznie do warszawy gdzie staje osiemnastego grudnia za nim pójdzie gwardja",
-            "na tę wiadomość napoleon postanawia ruszyć niezwłocznie do warszawy gdzie staje 18. 12 za nim pójdzie gwardja",
+            "na tę wiadomość napoleon postanawia ruszyć niezwłocznie do warszawy gdzie staje 18.12 za nim pójdzie gwardja",
         ),
         # PELCRA Diabiz – date with month + time context
         (
             "Wie pani co Chwileczkę Nie faktura jest piętnastego maja termin płatności minął dwudziestego I z tego względu plan spłaty został zerwany",
-            "wie pani co chwileczkę nie faktura jest 15. 5 termin płatności minął 20. i z tego względu plan spłaty został zerwany",
+            "wie pani co chwileczkę nie faktura jest 15.05 termin płatności minął 20. i z tego względu plan spłaty został zerwany",
         ),
         # PELCRA – currency + half
         (
@@ -76,8 +76,8 @@ def test_month_conditional_on_dataset(normalize):
     # isolated month stays, with day converts
     assert normalize("maja") == "maja"
     assert normalize("w maju") == "w maju"
-    assert normalize("trzeciego maja") == "3. 5"
-    assert normalize("pierwszego stycznia") == "1. 1"
+    assert normalize("trzeciego maja") == "03.05"
+    assert normalize("pierwszego stycznia") == "01.01"
 
 
 def test_fraction_idempotent_dataset(normalize):

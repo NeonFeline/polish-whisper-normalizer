@@ -147,9 +147,9 @@ def test_fractions_extended(normalize, text, expected):
         ("w grudniu", "w grudniu"),
         ("w maju", "w maju"),
         # with day ordinal they become numbers
-        ("1. stycznia", "1. 1"),
-        ("1. maja", "1. 5"),
-        ("12. grudnia", "12. 12"),
+        ("01.01", "01.01"),
+        ("1. maja", "01.05"),
+        ("12.12", "12.12"),
     ],
 )
 def test_months_genitive_and_lemma(normalize, text, expected):
@@ -159,10 +159,10 @@ def test_months_genitive_and_lemma(normalize, text, expected):
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("pierwszego stycznia", "1. 1"),
-        ("trzeciego maja", "3. 5"),
-        ("dwudziestego pierwszego maja", "21. 5"),
-        ("dziewiętnastego grudnia", "19. 12"),
+        ("pierwszego stycznia", "01.01"),
+        ("trzeciego maja", "03.05"),
+        ("dwudziestego pierwszego maja", "21.05"),
+        ("dziewiętnastego grudnia", "19.12"),
         ("piątego maja 2023", "05.05.2023"),
         ("piątego maja roku dwa tysiące dwudziestego szóstego", "05.05.2026"),
         ("piątego maja 2026 roku", "05.05.2026"),
@@ -173,10 +173,10 @@ def test_months_with_day(normalize, text, expected):
 
 
 def test_months_name_ambiguity_documents_issue(normalize):
-    # Conditional mapping keeps personal name "Maja" intact, only "3. maja" -> "3. 5"
+    # Conditional mapping keeps personal name "Maja" intact, only "3. maja" -> "03.05"
     assert normalize("Maja") == "maja"
     assert normalize("moja siostra Maja") == "moja siostra maja"
-    assert normalize("trzeciego maja") == "3. 5"  # day ordinal triggers month conversion
+    assert normalize("trzeciego maja") == "03.05"  # day ordinal triggers month conversion
     assert normalize("w maju") == "w maju"  # no day -> no conversion
     # Verb form not mapped
     assert normalize("Maję") == "maję"

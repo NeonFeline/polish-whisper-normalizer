@@ -938,8 +938,8 @@ class PolishTextNormalizer:
 
         s = self.standardize_numbers(s)
 
-        # conditional month mapping: only when preceded by day ordinal
-        # ("3. maja" -> "3. 5", but "maja" alone or "w maju" stays)
+        # conditional month mapping: only when preceded by day (with or without dot)
+        # ("3. maja" -> "3. 5", "5 maja" -> "5. 5", but "maja" alone or "w maju" stays)
         def _date_repl(m: re.Match[str]) -> str:
             day = m.group(1)
             month_word = m.group(2)
@@ -948,7 +948,7 @@ class PolishTextNormalizer:
                 return f"{day}. {month_num}"
             return m.group(0)
 
-        s = re.sub(r"(\d+)\.\s+([a-ząćęłńóśźż]+)\b", _date_repl, s)
+        s = re.sub(r"(\d+)\.?\s+([a-ząćęłńóśźż]+)\b", _date_repl, s)
 
         # full date formatting: "5. 5 roku 2026." -> "05.05.2026", "5. 5 2026" -> "05.05.2026" (uniform, no r)
         # day month rok year (roku before year)
@@ -966,11 +966,10 @@ class PolishTextNormalizer:
             day, month, year = m.group(1), m.group(2), m.group(3)
             return self._format_date(int(day), int(month), int(year))
 
-        # day month without year -> "05.05."
+        # day month without year -> "05.05" (as requested: 5 maja -> 05.05)
         def _day_month(m: re.Match[str]) -> str:
-            # avoid matching full date already handled (negative lookahead for year is done by order)
             day, month = m.group(1), m.group(2)
-            return f"{int(day):02d}.{int(month):02d}."
+            return f"{int(day):02d}.{int(month):02d}"
 
         # order matters: most specific first (handle roku and r. uniformly)
         s = re.sub(r"(\d+)\.\s+(\d+)\s+(?:roku|r\.?)\s+(\d+)\.?", _full_date_roku_before, s)
@@ -985,8 +984,9 @@ class PolishTextNormalizer:
         if not _wants_r:
             s = re.sub(r"(\d{2}\.\d{2}\.\d{4})\s+r\.?\b", r"\1", s)
             s = re.sub(r"(\d{2}\.\d{2}\.\d{4})r\.?\b", r"\1", s)
-        # only if no year follows, format day month as DD.MM. (avoid double-formatting)
-        # use negative lookahead to ensure not followed by year after formatting
+        # day month without year -> 5. 5 -> 05.05 (as requested)
+        # only when month is not ordinal (no trailing dot) – avoids "1. 2." -> "01.02."
+        s = re.sub(r"(\d+)\.\s+(\d+)\b(?!\.)", _day_month, s)
         # simpler: only format isolated day month when not already part of full date
         # we handle this by checking that after this point no 4-digit year remains
         # so apply day-month only on remaining "d. m" not part of full date

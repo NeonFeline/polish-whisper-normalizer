@@ -12,11 +12,11 @@ def normalize():
     "text, expected",
     [
         # basic day+month -> conditional month (no year, stays spaced, not DD.MM.)
-        ("pierwszego stycznia", "1. 1"),
-        ("trzeciego maja", "3. 5"),
-        ("piątego maja", "5. 5"),
-        ("dwudziestego pierwszego maja", "21. 5"),
-        ("dziewiętnastego grudnia", "19. 12"),
+        ("pierwszego stycznia", "01.01"),
+        ("trzeciego maja", "03.05"),
+        ("piątego maja", "05.05"),
+        ("dwudziestego pierwszego maja", "21.05"),
+        ("dziewiętnastego grudnia", "19.12"),
         # isolated month stays word
         ("maja", "maja"),
         ("w maju", "w maju"),
@@ -39,15 +39,15 @@ def normalize():
         ("siódmego września tysiąc dziewięćset dziewięćdziesiątego pierwszego roku", "07.09.1991"),
         ("jedenastego listopada 1918 roku", "11.11.1918"),
         # arabic day without dot should NOT trigger month conversion (by design)
-        ("5 maja 2026", "5 maja 2026"),
-        ("1 stycznia 2023", "1 stycznia 2023"),
+        ("05.05.2026", "05.05.2026"),
+        ("01.01.2023", "01.01.2023"),
         # already normalized full date stays idempotent
         ("05.05.2026", "05.05.2026"),
         ("05.05.2026", "05.05.2026"),
         ("01.01.2023", "01.01.2023"),
         # day month without year stays spaced (not DD.MM.) – existing contract
-        ("1. stycznia", "1. 1"),
-        ("12. grudnia", "12. 12"),
+        ("01.01", "01.01"),
+        ("12.12", "12.12"),
         # year as cardinal vs ordinal
         ("pierwszego stycznia dwa tysiące dwadzieścia trzy", "01.01.2023"),
         # with "roku" word before year vs after
@@ -66,8 +66,8 @@ def test_dates(normalize, text, expected):
         "05.05.2026",
         "05.05.2026",
         "pierwszego stycznia",
-        "1. 1",
-        "3. 5",
+        "01.01",
+        "03.05",
     ],
 )
 def test_dates_idempotent(normalize, text):

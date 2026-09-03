@@ -199,9 +199,9 @@ def test_declined_cardinals(normalize, text, expected):
         ("trzecia osoba", "3. osoba"),
         ("dwudziesty pierwszy wiek", "21. wiek"),
         ("piąta rocznica", "5. rocznica"),
-        ("trzeciego maja", "3. 5"),
-        ("dwudziestego pierwszego maja", "21. 5"),
-        ("dziewiętnastego grudnia", "19. 12"),
+        ("trzeciego maja", "03.05"),
+        ("dwudziestego pierwszego maja", "21.05"),
+        ("dziewiętnastego grudnia", "19.12"),
     ],
 )
 def test_declined_ordinals(normalize, text, expected):
@@ -611,7 +611,7 @@ def test_conjunction_i(normalize, text, expected):
     [
         (
             "Spotkanie odbędzie się dwudziestego pierwszego maja o piętnastej trzydzieści.",
-            "spotkanie odbędzie się 21. 5 o 15:30",
+            "spotkanie odbędzie się 21.05 o 15:30",
         ),
         (
             "Kosztowało to sto złotych i pięćdziesiąt groszy, a zniżka wyniosła dwadzieścia procent.",

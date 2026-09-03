@@ -447,10 +447,19 @@ class PolishNumberNormalizer:
                     else:
                         value = str(value) + str(tens)
             elif current in self.hundreds_ordinal:
-                if value is not None:
-                    yield output(value)
+                # ordinal hundred; composes with a preceding multiplier
+                # ("tysiąc dziewięćsetny" -> "1900.")
+                hundred = self.hundreds_ordinal[current]
                 ordinal = True
-                yield output(self.hundreds_ordinal[current])
+                if value is None:
+                    yield output(hundred)
+                elif isinstance(value, str):
+                    yield output(str(value) + str(hundred))
+                else:
+                    if value % 1000 == 0:
+                        value += hundred
+                    else:
+                        value = str(value) + str(hundred)
             elif current in self.multipliers_ordinal:
                 if value is not None:
                     yield output(value)

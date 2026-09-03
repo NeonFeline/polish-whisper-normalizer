@@ -526,6 +526,11 @@ def test_declined_ordinals_cases(normalize, text, expected):
         ("pięćsetnego", "500."),
         ("tysięcznego", "1000."),
         ("milionowego", "1000000."),
+        # ordinal multiplier + ordinal hundred composition
+        ("tysiąc dziewięćsetny", "1900."),
+        ("tysiąc dziewięćsetny rok", "1900. rok"),
+        ("tysiąc dwusetny", "1200."),
+        ("tysiąc dziewięćset dziewięćdziesiąty dziewiąty", "1999."),
     ],
 )
 def test_compound_ordinals(normalize, text, expected):

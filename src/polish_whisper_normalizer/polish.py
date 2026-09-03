@@ -614,6 +614,13 @@ class PolishTimeNormalizer:
         self._re_po = re.compile(
             r"\b(" + minutes_alt + r")\s+po\s+(" + hours_gen_alt + r")\b"
         )
+        # variants with an explicit "minut(ę/y)" word
+        self._re_za_minut = re.compile(
+            r"\bza\s+(" + minutes_alt + r")\s+minut(?:a|ę|y)?\s+(" + hours_alt + r")\b"
+        )
+        self._re_po_minut = re.compile(
+            r"\b(" + minutes_alt + r")\s+minut(?:a|ę|y)?\s+po\s+(" + hours_gen_alt + r")\b"
+        )
         self._re_godzina_min = re.compile(
             r"\bgodzina\s+(" + hours_alt + r")\s+(" + minutes_alt + r")\b"
         )
@@ -683,6 +690,9 @@ class PolishTimeNormalizer:
         for d in range(10):
             minutes["zero " + ones[d]] = d
         minutes.update(kwadrans)
+        # feminine cardinal forms used with "minuta/minuty"
+        minutes["jedna"] = 1
+        minutes["dwie"] = 2
         return minutes
 
     @staticmethod
@@ -699,6 +709,8 @@ class PolishTimeNormalizer:
         )
         s = self._re_za.sub(self._za_repl, s)
         s = self._re_po.sub(self._po_repl, s)
+        s = self._re_za_minut.sub(self._za_repl, s)
+        s = self._re_po_minut.sub(self._po_repl, s)
         s = self._re_godzina_min.sub(self._godzina_min_repl, s)
         s = self._re_godzina.sub(self._godzina_repl, s)
         s = self._re_hour_min.sub(self._hour_min_repl, s)

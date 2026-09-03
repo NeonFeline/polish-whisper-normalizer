@@ -105,6 +105,35 @@ def test_time_no_false_positive(normalize):
 @pytest.mark.parametrize(
     "text, expected",
     [
+        ("dziesięć minut po piątej", "5:10"),
+        ("piętnaście minut po piątej", "5:15"),
+        ("dwie minuty po piątej", "5:02"),
+        ("jedna minuta po piątej", "5:01"),
+        ("za dwadzieścia minut ósma", "7:40"),
+        ("za pięć minut dwunasta", "11:55"),
+        ("za dwie minuty ósma", "7:58"),
+    ],
+)
+def test_time_with_minut(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # "za X minut" without an hour is a duration, not a time
+        ("za pięć minut", "za 5 minut"),
+        ("pięć minut", "5 minut"),
+        ("za pięć minut wrócę", "za 5 minut wrócę"),
+    ],
+)
+def test_time_with_minut_no_false_positive(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
         ("źle", "źle"),
         ("mąż", "mąż"),
         ("pięć", "5"),

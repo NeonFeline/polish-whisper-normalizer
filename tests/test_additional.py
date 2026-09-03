@@ -95,28 +95,22 @@ def test_ordinal_multiplier_extended(normalize, text, expected):
 def test_fractions_extended(normalize, text, expected):
     assert normalize(text) == expected
 
-# --- months: comprehensive, highlights global-mapping trade-off ---
+# --- months: conditional (only after day ordinal) ---
 
 @pytest.mark.parametrize("text,expected", [
-    ("stycznia", "1"),
-    ("lutego", "2"),
-    ("marca", "3"),
-    ("kwietnia", "4"),
-    ("maja", "5"),
-    ("czerwca", "6"),
-    ("lipca", "7"),
-    ("sierpnia", "8"),
-    ("września", "9"),
-    ("października", "10"),
-    ("listopada", "11"),
-    ("grudnia", "12"),
-    # nominative too
-    ("styczeń", "1"),
-    ("maj", "5"),
-    ("grudzień", "12"),
-    # locative / dative
-    ("w grudniu", "w 12"),
-    ("w maju", "w 5"),
+    # isolated months stay words (conditional mapping prevents name collision)
+    ("stycznia", "stycznia"),
+    ("maja", "maja"),
+    ("grudnia", "grudnia"),
+    ("styczeń", "styczeń"),
+    ("maj", "maj"),
+    ("grudzień", "grudzień"),
+    ("w grudniu", "w grudniu"),
+    ("w maju", "w maju"),
+    # with day ordinal they become numbers
+    ("1. stycznia", "1. 1"),
+    ("1. maja", "1. 5"),
+    ("12. grudnia", "12. 12"),
 ])
 def test_months_genitive_and_lemma(normalize, text, expected):
     assert normalize(text) == expected
@@ -132,10 +126,11 @@ def test_months_with_day(normalize, text, expected):
     assert normalize(text) == expected
 
 def test_months_name_ambiguity_documents_issue(normalize):
-    # Global mapping converts personal name "Maja" -> "5", which is undesirable.
-    # This test documents the current behaviour and questions its sensibleness.
-    assert normalize("Maja") == "5"  # name incorrectly mapped
-    assert normalize("moja siostra Maja") == "moja siostra 5"
+    # Conditional mapping keeps personal name "Maja" intact, only "3. maja" -> "3. 5"
+    assert normalize("Maja") == "maja"
+    assert normalize("moja siostra Maja") == "moja siostra maja"
+    assert normalize("trzeciego maja") == "3. 5"  # day ordinal triggers month conversion
+    assert normalize("w maju") == "w maju"  # no day -> no conversion
     # Verb form not mapped
     assert normalize("Maję") == "maję"
 

@@ -323,7 +323,7 @@ class PolishNumberNormalizer:
         if cached is not None:
             return cached
 
-        candidates = {"num": None, "adj": None, "subst": None, "percent": None, "currency": None, "month": None}
+        candidates = {"num": None, "adj": None, "subst": None, "percent": None, "currency": None}
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "num" and base in self.cardinal_lemmas:
                 candidates["num"] = base
@@ -335,11 +335,9 @@ class PolishNumberNormalizer:
                 candidates["percent"] = base
             elif pos == "subst" and base in self.currency_lemmas:
                 candidates["currency"] = base
-            elif pos == "subst" and base in self.month_lemmas:
-                candidates["month"] = self.month_lemmas[base]
 
         result = word
-        for key in ("num", "adj", "subst", "percent", "currency", "month"):
+        for key in ("num", "adj", "subst", "percent", "currency"):
             if candidates[key] is not None:
                 result = candidates[key]
                 break
@@ -874,6 +872,12 @@ class PolishTextNormalizer:
         self.standardize_numbers = PolishNumberNormalizer()
         self.standardize_time = PolishTimeNormalizer()
 
+    def _month_number(self, word: str) -> Optional[str]:
+        for base, pos in self.standardize_numbers.lemmatizer.analyse(word):
+            if pos == "subst" and base in self.standardize_numbers.month_lemmas:
+                return self.standardize_numbers.month_lemmas[base]
+        return None
+
     def __call__(self, s: str):
         s = s.lower()
 
@@ -892,10 +896,22 @@ class PolishTextNormalizer:
 
         s = self.standardize_numbers(s)
 
+        # conditional month mapping: only when preceded by day ordinal
+        # ("3. maja" -> "3. 5", but "maja" alone or "w maju" stays)
+        def _date_repl(m: Match) -> str:
+            day = m.group(1)
+            month_word = m.group(2)
+            month_num = self._month_number(month_word)
+            if month_num:
+                return f"{day}. {month_num}"
+            return m.group(0)
+
+        s = re.sub(r"(\d+)\.\s+([a-ząćęłńóśźż]+)\b", _date_repl, s)
+
         # remove leftover symbols that are not part of a number/time
         s = re.sub(r"([^0-9])%", r"\1 ", s)
         s = re.sub(r"(?<!\d):|:(?!\d)", " ", s)
         s = re.sub(r"[-+](?!\d)", " ", s)
 
         s = re.sub(r"\s+", " ", s)  # replace successive whitespaces with a space
-        return s
+        return s.strip()

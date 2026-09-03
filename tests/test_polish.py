@@ -212,7 +212,7 @@ def test_declined_ordinals(normalize, text, expected):
 
 
 def test_non_number_words_untouched(normalize):
-    assert normalize("maja") == "5"
+    assert normalize("maja") == "maja"
     assert normalize("jedynka") == "jedynka"
     assert normalize("dwójka") == "dwójka"
     assert normalize("setka") == "setka"

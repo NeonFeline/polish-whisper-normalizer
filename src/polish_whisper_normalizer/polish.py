@@ -269,6 +269,28 @@ class PolishNumberNormalizer:
             | set(self.hundreds_ordinal)
             | set(self.multipliers_ordinal)
         )
+        self.ordinal_values = {
+            **self.ones_ordinal,
+            **self.tens_ordinal,
+            **self.hundreds_ordinal,
+            **self.multipliers_ordinal,
+        }
+
+        # feminine/neuter cardinal forms used as fraction numerators
+        # ("jedna trzecia" -> 1/3); masculine "jeden"/"dwa" are excluded
+        # ("jeden drugi" is not a fraction)
+        self.fraction_numerators = {
+            "jedna": 1,
+            "dwie": 2,
+            "trzy": 3,
+            "cztery": 4,
+            "pięć": 5,
+            "sześć": 6,
+            "siedem": 7,
+            "osiem": 8,
+            "dziewięć": 9,
+            "dziesięć": 10,
+        }
 
         self.lemmatizer = PolishLemmatizer()
         self._canon_cache = {}
@@ -525,9 +547,36 @@ class PolishNumberNormalizer:
     def postprocess(self, s: str):
         return s
 
+    def _fraction_denominator(self, word: str):
+        """Return the ordinal value of `word` if it is a fraction denominator."""
+        for base, pos in self.lemmatizer.analyse(word):
+            if pos == "adj" and base in self.ordinal_values:
+                value = self.ordinal_values[base]
+                if value >= 2:
+                    return value
+        return None
+
+    def _convert_fractions(self, words: List[str]) -> List[str]:
+        """Turn "jedna trzecia" -> "1/3", "trzy czwarte" -> "3/4", etc."""
+        result = []
+        i = 0
+        n = len(words)
+        while i < n:
+            numerator = self.fraction_numerators.get(words[i])
+            if numerator is not None and i + 1 < n:
+                denominator = self._fraction_denominator(words[i + 1])
+                if denominator is not None:
+                    result.append(f"{numerator}/{denominator}")
+                    i += 2
+                    continue
+            result.append(words[i])
+            i += 1
+        return result
+
     def __call__(self, s: str):
         s = self.preprocess(s)
-        words = [self._canonicalize(w) for w in s.split()]
+        words = self._convert_fractions(s.split())
+        words = [self._canonicalize(w) for w in words]
         s = " ".join(word for word in self.process_words(words) if word is not None)
         s = self.postprocess(s)
         return s

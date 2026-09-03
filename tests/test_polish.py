@@ -747,3 +747,50 @@ def test_currency_declined_amounts(normalize, text, expected):
 )
 def test_currency_stray(normalize, text, expected):
     assert normalize(text) == expected
+
+
+# ---------------------------------------------------------------------------
+# Fractions
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("jedna druga", "1/2"),
+        ("jedna trzecia", "1/3"),
+        ("jedna czwarta", "1/4"),
+        ("jedna piąta", "1/5"),
+        ("jedna szósta", "1/6"),
+        ("jedna dziesiąta", "1/10"),
+        ("jedna setna", "1/100"),
+        ("jedna tysięczna", "1/1000"),
+        ("dwie trzecie", "2/3"),
+        ("dwie piąte", "2/5"),
+        ("trzy czwarte", "3/4"),
+        ("trzy piąte", "3/5"),
+        ("cztery piąte", "4/5"),
+        ("pięć szóstych", "5/6"),
+        ("siedem dziesiątych", "7/10"),
+        ("trzy czwarte godziny", "3/4 godziny"),
+        ("jedna trzecia klasy", "1/3 klasy"),
+    ],
+)
+def test_fractions(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # ordinals are not treated as fractions
+        ("trzecia osoba", "3. osoba"),
+        ("druga strona", "2. strona"),
+        ("sto pierwszy", "101."),
+        ("dwudziesty pierwszy", "21."),
+        # feminine cardinals without a following ordinal stay cardinal
+        ("dwie osoby", "2 osoby"),
+        ("trzy lata", "3 lata"),
+    ],
+)
+def test_fraction_no_false_positive(normalize, text, expected):
+    assert normalize(text) == expected

@@ -888,7 +888,7 @@ class PolishTextNormalizer:
         s = self.standardize_time(s)
 
         s = re.sub(r"(\d),(\d)", r"\1.\2", s)  # Polish decimal comma -> point
-        s = remove_symbols(s, keep=".:%$€£¢+-")  # keep numeric/time/sign/currency symbols
+        s = remove_symbols(s, keep=".:/%$€£¢+-")  # keep numeric/time/sign/currency symbols + fraction slash
 
         s = self.standardize_numbers(s)
 

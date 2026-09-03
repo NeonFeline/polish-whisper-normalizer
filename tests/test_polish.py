@@ -390,6 +390,12 @@ def test_currency(normalize, text, expected):
         ("dwadzieścia procent", "20%"),
         ("sto procent", "100%"),
         ("trzydzieści pięć procent", "35%"),
+        # declined forms (via Morfeusz lemmatization)
+        ("pięć procentów", "5%"),
+        ("dwadzieścia procentów", "20%"),
+        ("pięćdziesiąt procenty", "50%"),
+        ("pięć procenta", "5%"),
+        ("dziesięć procentem", "10%"),
     ],
 )
 def test_percent(normalize, text, expected):

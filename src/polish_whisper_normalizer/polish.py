@@ -269,6 +269,8 @@ class PolishNumberNormalizer:
             | set(self.hundreds_ordinal)
             | set(self.multipliers_ordinal)
         )
+        # non-number words whose declined forms we canonicalize (-> "%")
+        self.percent_lemmas = {"procent"}
 
         self.lemmatizer = PolishLemmatizer()
         self._canon_cache = {}
@@ -283,7 +285,7 @@ class PolishNumberNormalizer:
         if cached is not None:
             return cached
 
-        candidates = {"num": None, "adj": None, "subst": None}
+        candidates = {"num": None, "adj": None, "subst": None, "percent": None}
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "num" and base in self.cardinal_lemmas:
                 candidates["num"] = base
@@ -291,9 +293,11 @@ class PolishNumberNormalizer:
                 candidates["adj"] = base
             elif pos == "subst" and base in self.multiplier_lemmas:
                 candidates["subst"] = base
+            elif pos == "subst" and base in self.percent_lemmas:
+                candidates["percent"] = base
 
         result = word
-        for key in ("num", "adj", "subst"):
+        for key in ("num", "adj", "subst", "percent"):
             if candidates[key] is not None:
                 result = candidates[key]
                 break

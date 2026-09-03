@@ -323,7 +323,7 @@ class PolishNumberNormalizer:
         if cached is not None:
             return cached
 
-        candidates = {"num": None, "adj": None, "subst": None, "percent": None, "currency": None}
+        candidates = {"num": None, "adj": None, "subst": None, "percent": None, "currency": None, "month": None}
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "num" and base in self.cardinal_lemmas:
                 candidates["num"] = base
@@ -335,9 +335,11 @@ class PolishNumberNormalizer:
                 candidates["percent"] = base
             elif pos == "subst" and base in self.currency_lemmas:
                 candidates["currency"] = base
+            elif pos == "subst" and base in self.month_lemmas:
+                candidates["month"] = self.month_lemmas[base]
 
         result = word
-        for key in ("num", "adj", "subst", "percent", "currency"):
+        for key in ("num", "adj", "subst", "percent", "currency", "month"):
             if candidates[key] is not None:
                 result = candidates[key]
                 break

@@ -624,6 +624,10 @@ class PolishTimeNormalizer:
         self._re_hour_gen_min = re.compile(
             r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b"
         )
+        # "od piątej do szóstej" -> "od 5:00 do 6:00"
+        self._re_range = re.compile(
+            r"\bod\s+(" + hours_gen_alt + r")\s+do\s+(" + hours_gen_alt + r")\b"
+        )
 
     @staticmethod
     def _ones_words() -> List[str]:
@@ -703,6 +707,7 @@ class PolishTimeNormalizer:
         s = self._re_godzina.sub(self._godzina_repl, s)
         s = self._re_hour_min.sub(self._hour_min_repl, s)
         s = self._re_hour_gen_min.sub(self._hour_gen_min_repl, s)
+        s = self._re_range.sub(self._range_repl, s)
         return s
 
     def _za_repl(self, m: Match) -> str:
@@ -735,6 +740,11 @@ class PolishTimeNormalizer:
         hour = self.hours_gen[m.group(1)]
         minute = self.minutes[m.group(2)]
         return f"{hour}:{minute:02d}"
+
+    def _range_repl(self, m: Match) -> str:
+        start = self.hours_gen[m.group(1)]
+        end = self.hours_gen[m.group(2)]
+        return f"od {start}:00 do {end}:00"
 
 
 class PolishTextNormalizer:

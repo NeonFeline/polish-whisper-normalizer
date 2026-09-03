@@ -105,6 +105,23 @@ def test_time_no_false_positive(normalize):
 @pytest.mark.parametrize(
     "text, expected",
     [
+        ("od piątej do szóstej", "od 5:00 do 6:00"),
+        ("od ósmej do dziesiątej", "od 8:00 do 10:00"),
+        ("pracuję od dziewiątej do piątej", "pracuję od 9:00 do 5:00"),
+    ],
+)
+def test_time_ranges(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+def test_time_ranges_no_false_positive(normalize):
+    # masculine ordinal range is a date/ordinal, not a time
+    assert normalize("od piątego do szóstego") == "od 5. do 6."
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
         ("źle", "źle"),
         ("mąż", "mąż"),
         ("pięć", "5"),

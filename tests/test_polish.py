@@ -105,6 +105,36 @@ def test_time_no_false_positive(normalize):
 @pytest.mark.parametrize(
     "text, expected",
     [
+        ("o piątej", "o 5:00"),
+        ("o ósmej", "o 8:00"),
+        ("o dwunastej", "o 12:00"),
+        ("o pierwszej", "o 1:00"),
+        ("spotkanie o piątej", "spotkanie o 5:00"),
+        ("o piątej, ale", "o 5:00 ale"),
+        ("przyjdź o szóstej", "przyjdź o 6:00"),
+        ("wstaję o siódmej", "wstaję o 7:00"),
+    ],
+)
+def test_standalone_time(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # "o + ordinal + noun" is not a time ("about the Nth ...")
+        ("o drugiej stronie", "o 2. stronie"),
+        ("o trzeciej osobie", "o 3. osobie"),
+        ("o piątej stronie", "o 5. stronie"),
+    ],
+)
+def test_standalone_time_no_false_positive(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
         ("źle", "źle"),
         ("mąż", "mąż"),
         ("pięć", "5"),

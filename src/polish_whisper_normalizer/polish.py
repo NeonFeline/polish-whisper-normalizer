@@ -624,6 +624,10 @@ class PolishTimeNormalizer:
         self._re_hour_gen_min = re.compile(
             r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b"
         )
+        # "o piątej" -> "o 5:00" (genitive hour, not followed by a word)
+        self._re_o_hour = re.compile(
+            r"\bo\s+(" + hours_gen_alt + r")\b(?!\s*[a-ząćęłńóśźż])"
+        )
 
     @staticmethod
     def _ones_words() -> List[str]:
@@ -703,6 +707,7 @@ class PolishTimeNormalizer:
         s = self._re_godzina.sub(self._godzina_repl, s)
         s = self._re_hour_min.sub(self._hour_min_repl, s)
         s = self._re_hour_gen_min.sub(self._hour_gen_min_repl, s)
+        s = self._re_o_hour.sub(self._o_hour_repl, s)
         return s
 
     def _za_repl(self, m: Match) -> str:
@@ -735,6 +740,10 @@ class PolishTimeNormalizer:
         hour = self.hours_gen[m.group(1)]
         minute = self.minutes[m.group(2)]
         return f"{hour}:{minute:02d}"
+
+    def _o_hour_repl(self, m: Match) -> str:
+        hour = self.hours_gen[m.group(1)]
+        return f"o {hour}:00"
 
 
 class PolishTextNormalizer:

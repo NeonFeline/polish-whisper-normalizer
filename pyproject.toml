@@ -1,0 +1,23 @@
+[project]
+name = "polish-whisper-normalizer"
+version = "0.1.0"
+description = "Polish text normalizer for Whisper ASR output (keeps diacritics, normalizes numbers, time, currency)"
+readme = "README.md"
+authors = [
+    { name = "NeonFeline", email = "maciejlachut77@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "regex",
+    "more-itertools",
+    "morfeusz2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.19,<0.12.0"]
+build-backend = "uv_build"

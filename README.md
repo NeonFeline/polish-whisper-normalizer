@@ -75,6 +75,17 @@ PolishTextNormalizer(date_format="{day}/{month}/{year}")("piątego maja 2026")
 # diacritics
 BasicTextNormalizer()("Żółć!")  # → "żółć"
 BasicTextNormalizer(remove_diacritics=True)("Żółć!")  # → "zolc"
+
+# jiwer WER (words→digits, dates, time normalized before WER)
+# pip install polish-whisper-normalizer[jiwer]
+import jiwer
+from polish_whisper_normalizer.jiwer import wer, PolishTransform, polish_transform
+wer("piątego maja 2026", "05.05.2026")  # → 0.0  (raw jiwer.wer → 1.0)
+jiwer.wer("piątego maja 2026", "05.05.2026",
+          reference_transform=polish_transform,
+          hypothesis_transform=polish_transform)  # → 0.0
+# custom date_format
+wer("piątego maja 2026", "2026-05-05", date_format="%Y-%m-%d")  # → 0.0
 ```
 
 <details><summary>Components</summary>

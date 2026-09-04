@@ -13,6 +13,9 @@ dependencies = [
     "morfeusz2",
 ]
 
+[project.optional-dependencies]
+jiwer = ["jiwer>=3.0"]
+
 [dependency-groups]
 dev = [
     "pytest",

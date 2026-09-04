@@ -88,6 +88,44 @@ jiwer.wer("piątego maja 2026", "05.05.2026",
 wer("piątego maja 2026", "2026-05-05", date_format="%Y-%m-%d")  # → 0.0
 ```
 
+### Jiwer — WER with Polish normalization
+
+```bash
+uv pip install "polish-whisper-normalizer[jiwer]"
+# or
+uv sync --extra jiwer
+```
+
+Without normalization `jiwer.wer` penalizes `piątego maja 2026` vs `05.05.2026` as 100 % error. With `PolishTransform` they match:
+
+```python
+import jiwer
+from polish_whisper_normalizer.jiwer import wer, PolishTransform, polish_transform
+
+# helper (recommended) — normalizes both sides with PolishTextNormalizer
+wer("piątego maja 2026", "05.05.2026")  # → 0.0
+wer("o piątej", "o 5:00")  # → 0.0
+wer("pięć złotówek", "5 zł")  # → 0.0
+
+# raw jiwer would be 1.0
+jiwer.wer("piątego maja 2026", "05.05.2026")  # → 1.0
+
+# via jiwer transforms (for pipelines)
+jiwer.wer("piątego maja 2026", "05.05.2026",
+          reference_transform=polish_transform,
+          hypothesis_transform=polish_transform)  # → 0.0
+
+# custom date_format is forwarded
+wer("piątego maja 2026", "2026-05-05", date_format="%Y-%m-%d")  # → 0.0
+
+# manual Compose
+tr = jiwer.Compose([PolishTransform(date_format="%Y-%m-%d"), jiwer.RemoveMultipleSpaces(), jiwer.Strip(), jiwer.ReduceToListOfListOfWords()])
+jiwer.wer("piątego maja 2026", "2026-05-05",
+          reference_transform=tr, hypothesis_transform=tr)  # → 0.0
+```
+
+`PolishTransform` wraps `PolishTextNormalizer` (`date_format` kwarg supported) and returns `str`; `polish_transform` is the ready `Compose` ending with `ReduceToListOfListOfWords` required by `jiwer.wer`.
+
 <details><summary>Components</summary>
 
 ```python
@@ -169,6 +207,18 @@ PolishTextNormalizer(date_format="%Y-%m-%d")("piątego maja 2026")
 ```
 
 `maja` jako imię `Maja` zostaje `maja` (nie `5`), `na północ` nie staje się `0:00`.
+
+#### Jiwer — WER po polsku
+
+```bash
+uv pip install "polish-whisper-normalizer[jiwer]"
+```
+
+```python
+from polish_whisper_normalizer.jiwer import wer
+wer("piątego maja 2026", "05.05.2026")  # → 0.0  (bez normalizacji 1.0)
+wer("o piątej", "o 5:00")  # → 0.0
+```
 
 ### Rozwój / testy
 

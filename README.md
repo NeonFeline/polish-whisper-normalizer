@@ -39,8 +39,10 @@
 ```bash
 uv sync                 # dev + morfeusz2
 uv pip install -e .     # editable
-# or from PyPI (once published)
+# or from PyPI
 uv pip install polish-whisper-normalizer
+# with jiwer extra
+uv pip install "polish-whisper-normalizer[jiwer]"
 ```
 
 Requires **Python ≥3.10**, `regex`, `more-itertools`, `morfeusz2`.
@@ -188,7 +190,9 @@ MIT — see `LICENSE` (inherits Whisper MIT for `basic.py`).
 ### Instalacja i użycie (PL)
 
 ```bash
-uv sync
+uv sync                 # dev + morfeusz2
+uv pip install polish-whisper-normalizer  # z PyPI
+uv pip install "polish-whisper-normalizer[jiwer]"  # z jiwer
 ```
 
 ```python

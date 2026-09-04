@@ -877,9 +877,7 @@ class PolishTimeNormalizer:
 
 
 class PolishTextNormalizer:
-    def __init__(
-        self, date_format: str = "{day:02d}.{month:02d}.{year}", **kwargs: object
-    ) -> None:
+    def __init__(self, date_format: str = "{day:02d}.{month:02d}.{year}", **kwargs: object) -> None:
         """
         Args:
             date_format: How to render full dates (day month year). Supports

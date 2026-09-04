@@ -1,6 +1,6 @@
 [project]
 name = "polish-whisper-normalizer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Polish text normalizer for Whisper ASR output (keeps diacritics, normalizes numbers, time, currency)"
 readme = "README.md"
 authors = [

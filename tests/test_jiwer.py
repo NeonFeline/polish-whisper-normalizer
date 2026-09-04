@@ -30,7 +30,15 @@ def test_polish_transform_compose():
     # direct string transform
     assert tr.process_string("piątego maja 2026") == "05.05.2026"
     # via jiwer
-    assert jiwer.wer("piątego maja 2026", "05.05.2026", reference_transform=polish_transform, hypothesis_transform=polish_transform) == 0.0
+    assert (
+        jiwer.wer(
+            "piątego maja 2026",
+            "05.05.2026",
+            reference_transform=polish_transform,
+            hypothesis_transform=polish_transform,
+        )
+        == 0.0
+    )
 
 
 def test_custom_date_format():

@@ -28,9 +28,7 @@ class PolishTransform(jiwer.transforms.AbstractTransform):
         0.0
     """
 
-    def __init__(
-        self, normalizer: PolishTextNormalizer | None = None, **kwargs: object
-    ) -> None:
+    def __init__(self, normalizer: PolishTextNormalizer | None = None, **kwargs: object) -> None:
         # allow passing date_format etc. via kwargs
         if normalizer is None:
             if kwargs:
@@ -80,7 +78,12 @@ def wer(
             ]
         )
         return jiwer.wer(reference, hypothesis, reference_transform=tr, hypothesis_transform=tr)
-    return jiwer.wer(reference, hypothesis, reference_transform=polish_transform, hypothesis_transform=polish_transform)
+    return jiwer.wer(
+        reference,
+        hypothesis,
+        reference_transform=polish_transform,
+        hypothesis_transform=polish_transform,
+    )
 
 
 __all__ = ["PolishTransform", "polish_transform", "wer"]

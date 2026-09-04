@@ -1,4 +1,5 @@
 site_name: Polish Whisper Normalizer
+site_url: https://neonfeline.github.io/polish-whisper-normalizer/
 site_description: Polish text normalizer for Whisper ASR (keeps diacritics, normalizes numbers/time/currency)
 repo_url: https://github.com/NeonFeline/polish-whisper-normalizer
 theme:

@@ -703,6 +703,57 @@ class PolishNumberNormalizer:
         return s
 
     def postprocess(self, s: str) -> str:
+        # Normalize decimal fractions expressed as "21 i 5/10" (from
+        # "dwadzieścia jeden i pięć dziesiątych") to decimal "21.5"
+        # for equivalence with "21.5" reference (WER on jednostki).
+        # Only for decimal denominators (10,100,1000...) and numerator < denominator.
+        def _decimal_repl(m: re.Match[str]) -> str:
+            int_part = m.group(1)
+            num = int(m.group(2))
+            den = int(m.group(3))
+            den_str = str(den)
+            # only power-of-10 denominators are decimal fractions
+            if den_str[0] != "1" or any(c != "0" for c in den_str[1:]):
+                return m.group(0)
+            if num >= den or num == 0:
+                return m.group(0)
+            k = len(den_str) - 1
+            frac_str = f"{num:0{k}d}"
+            dec = f"{int_part}.{frac_str}"
+            # strip trailing zeros for canonical decimal (50/100 -> 21.5 not 21.50)
+            # but keep leading zeros (5/100 -> 05 -> 21.05)
+            if "." in dec:
+                dec = dec.rstrip("0").rstrip(".")
+                if dec.endswith("."):
+                    dec += "0"
+                if "." not in dec:
+                    dec = f"{int_part}.0"
+            return dec
+
+        s = re.sub(r"\b(\d+)\s+i\s+(\d+)/(\d+)\b", _decimal_repl, s)
+
+        # Also normalize standalone decimal fractions "5/10" -> "0.5"
+        # so "pięć dziesiątych" vs "0.5" are equivalent.
+        def _standalone_frac_repl(m: re.Match[str]) -> str:
+            num = int(m.group(1))
+            den = int(m.group(2))
+            den_str = str(den)
+            if den_str[0] != "1" or any(c != "0" for c in den_str[1:]):
+                return m.group(0)
+            if num >= den or num == 0:
+                return m.group(0)
+            k = len(den_str) - 1
+            frac_str = f"{num:0{k}d}"
+            dec = f"0.{frac_str}"
+            dec = dec.rstrip("0").rstrip(".")
+            if dec == "0":
+                dec = "0.0"
+            if "." not in dec:
+                dec = "0.0"
+            # keep minimal representation: 0.5 not 0.50, but 0.05 stays
+            return dec
+
+        s = re.sub(r"\b(\d+)/(\d+)\b", _standalone_frac_repl, s)
         return s
 
     def _fraction_denominator(self, word: str) -> int | None:
@@ -729,22 +780,22 @@ class PolishNumberNormalizer:
         """Return cardinal value for fraction numerator via Morfeusz.
 
         Supports declined forms (e.g. "jednej" -> 1, "dwóch" -> 2) and
-        broader range (11-19, 20-90) via Morfeusz lemmatization.
-        Restricted to <100 to avoid colliding with ordinal compounds like
-        "sto dwudziesty" -> 120. (which is ordinal, not fraction 100/20)
+        broader range (1-19, 20-90, 100-900) via Morfeusz lemmatization.
+        Hundreds are included for decimal fractions like
+        "czterysta pięćdziesiąt sześć tysięcznych" -> 456/1000.
+        Collision with ordinal compounds (e.g. "sto dwudziesty" -> 100/20)
+        is avoided by numerator < denominator check in caller.
         """
         # direct feminine dict (fast path, includes ASCII variants)
         if word in self.fraction_numerators:
             return self.fraction_numerators[word]
-        # direct cardinal maps (covers 1-19, tens, zero + ASCII) – exclude hundreds to avoid ordinal compound misclassify
+        # direct cardinal maps (covers 1-19, tens, hundreds, zero + ASCII)
         if word in self.ones:
-            v = self.ones[word]
-            if v < 100:
-                return v
+            return self.ones[word]
         if word in self.tens:
-            v = self.tens[word]
-            if v < 100:
-                return v
+            return self.tens[word]
+        if word in self.hundreds:
+            return self.hundreds[word]
         if word in self.zeros:
             return 0
         # via Morfeusz – handle declensions like "jednej" -> "jeden" (adj)
@@ -752,13 +803,11 @@ class PolishNumberNormalizer:
             if base in self.fraction_numerators:
                 return self.fraction_numerators[base]
             if base in self.ones:
-                v = self.ones[base]
-                if v < 100:
-                    return v
+                return self.ones[base]
             if base in self.tens:
-                v = self.tens[base]
-                if v < 100:
-                    return v
+                return self.tens[base]
+            if base in self.hundreds:
+                return self.hundreds[base]
             if base in self.zeros:
                 return 0
         # fallback diacritic-less declined map (e.g. "pieciu" -> "pięć")
@@ -767,25 +816,74 @@ class PolishNumberNormalizer:
             if mapped in self.fraction_numerators:
                 return self.fraction_numerators[mapped]
             if mapped in self.ones:
-                v = self.ones[mapped]
-                if v < 100:
-                    return v
+                return self.ones[mapped]
             if mapped in self.tens:
-                v = self.tens[mapped]
-                if v < 100:
-                    return v
+                return self.tens[mapped]
+            if mapped in self.hundreds:
+                return self.hundreds[mapped]
             if mapped in self.zeros:
                 return 0
         return None
 
     def _parse_fraction_numerator(self, words: list[str], start: int) -> tuple[int, int] | None:
-        """Parse 1-2 word cardinal numerator at words[start:].
+        """Parse 1-3 word cardinal numerator at words[start:].
 
-        Handles "dwadzieścia trzy" -> 23 for fractions.
-        Returns (value, length) or None.
+        Handles "dwadzieścia trzy" -> 23, "czterysta pięćdziesiąt sześć" -> 456
+        for fractions. Returns (value, length) or None.
         """
         n = len(words)
-        # try 2-word tens + ones (e.g. "dwadzieścia trzy" -> 23)
+        # try 3-word hundreds + tens + ones (e.g. "czterysta pięćdziesiąt sześć" -> 456)
+        if start + 2 < n:
+            v1 = self._fraction_numerator_value(words[start])
+            v2 = self._fraction_numerator_value(words[start + 1])
+            v3 = self._fraction_numerator_value(words[start + 2])
+            if v1 is not None and v2 is not None and v3 is not None:
+                # hundreds 100-900 + tens 10-90 + ones 1-9
+                if v1 in {100, 200, 300, 400, 500, 600, 700, 800, 900}:
+                    if (
+                        v2
+                        in {10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 30, 40, 50, 60, 70, 80, 90}
+                        and 1 <= v3 <= 9
+                    ):
+                        # need tens+ones distinct: e.g. 400+50+6, but also 100+20+3
+                        # also handle 100+11+? but 11 already includes ones, so avoid double
+                        if v2 < 20 and v3 < 10:
+                            # v2 is 10-19, v3 would be extra ones -> invalid (e.g. 10 + 1)
+                            pass
+                        else:
+                            return v1 + v2 + v3, 3
+                    # hundreds + tens (e.g. "czterysta pięćdziesiąt" -> 450)
+                    if v2 in {
+                        10,
+                        11,
+                        12,
+                        13,
+                        14,
+                        15,
+                        16,
+                        17,
+                        18,
+                        19,
+                        20,
+                        30,
+                        40,
+                        50,
+                        60,
+                        70,
+                        80,
+                        90,
+                    } and v3 in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
+                        # already handled above as 3-word, but we try 3-word only if both
+                        pass
+                # also try hundreds + ones (e.g. "sto pięć" -> 105)
+                if (
+                    v1 in {100, 200, 300, 400, 500, 600, 700, 800, 900}
+                    and 1 <= v3 <= 9
+                    and v2 in {1, 2, 3, 4, 5, 6, 7, 8, 9}
+                ):
+                    # this is actually 2-word hundreds+ones, handled below, but 3-word with middle tens missing
+                    pass
+        # try 2-word
         if start + 1 < n:
             v1 = self._fraction_numerator_value(words[start])
             v2 = self._fraction_numerator_value(words[start + 1])
@@ -793,10 +891,57 @@ class PolishNumberNormalizer:
                 # tens 20-90 + ones 1-9
                 if v1 in {20, 30, 40, 50, 60, 70, 80, 90} and 1 <= v2 <= 9:
                     return v1 + v2, 2
-                # also handle "sto dwadzieścia" etc not needed for fractions but allow hundreds?
-                if v1 == 100 and v2 in {20, 30, 40, 50, 60, 70, 80, 90, *range(1, 20)}:
-                    # "sto dwadzieścia" -> 120 (rare as numerator)
+                # hundreds 100-900 + tens 10-90 or ones 1-9 or teens 10-19
+                if v1 in {100, 200, 300, 400, 500, 600, 700, 800, 900} and v2 in {
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16,
+                    17,
+                    18,
+                    19,
+                    20,
+                    30,
+                    40,
+                    50,
+                    60,
+                    70,
+                    80,
+                    90,
+                }:
                     return v1 + v2, 2
+                # hundreds + ones with tens missing already covered above, but also try 100+5
+                # tens + ones already handled, also try teens + ones? not needed
+        # try 3-word again for hundreds+tens+ones where we missed: do generic sum check
+        if start + 2 < n:
+            vals = [self._fraction_numerator_value(words[start + i]) for i in range(3)]
+            if all(v is not None for v in vals):  # type: ignore[arg-type]
+                v1, v2, v3 = vals  # type: ignore[assignment]
+                # allow sum if values are descending magnitude and <1000
+                # e.g. 400+50+6, 100+20+3, 200+11+? but 11 includes ones
+                # simple check: v1 is hundreds, v2 is tens/10-19, v3 is ones, and v1>v2>v3
+                if (
+                    v1 in {100, 200, 300, 400, 500, 600, 700, 800, 900}
+                    and v2
+                    in {10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 30, 40, 50, 60, 70, 80, 90}
+                    and v3 in {1, 2, 3, 4, 5, 6, 7, 8, 9}
+                    and (v1 > v2 > v3 or (v1 > v2 and v2 >= 10 and v3 < 10))
+                    and not (10 <= v2 <= 19 and v3 < 10)
+                ):
+                    return v1 + v2 + v3, 3
+                # also 100+20+3 case already, but ensure
         # single word
         v = self._fraction_numerator_value(words[start])
         if v is not None:
@@ -809,6 +954,8 @@ class PolishNumberNormalizer:
         Uses Morfeusz for declined numerators (e.g. "jednej trzeciej" -> "1/3",
         "dwóch trzecich" -> "2/3") and supports broader range (11-19) and
         multi-word numerators like "dwadzieścia trzy setne" -> "23/100".
+        Requires numerator < denominator to avoid colliding with ordinal
+        compounds like "sto dwudziesty" -> 120 (not 100/20).
         """
         result: list[str] = []
         i = 0
@@ -818,7 +965,7 @@ class PolishNumberNormalizer:
             if parsed is not None and i + parsed[1] < n:
                 numerator, length = parsed
                 denominator = self._fraction_denominator(words[i + length])
-                if denominator is not None:
+                if denominator is not None and numerator < denominator:
                     result.append(f"{numerator}/{denominator}")
                     i += length + 1
                     continue

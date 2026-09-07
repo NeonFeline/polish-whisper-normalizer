@@ -294,6 +294,18 @@ class PolishNumberNormalizer:
             "październik": "10",
             "listopad": "11",
             "grudzień": "12",
+            # abbreviated months (Morfeusz-independent, common in refs)
+            "sty": "1",
+            "lut": "2",
+            "mar": "3",
+            "kwi": "4",
+            "cze": "6",
+            "lip": "7",
+            "sie": "8",
+            "wrz": "9",
+            "paź": "10",
+            "lis": "11",
+            "gru": "12",
         }
 
         # --- ASCII-folded variants (support diacritic-less ASR output) ---------------
@@ -437,6 +449,9 @@ class PolishNumberNormalizer:
                 candidates["num"] = base
             elif pos == "adj" and base in self.ordinal_lemmas:
                 candidates["adj"] = base
+            elif pos == "adj" and base in self.cardinal_lemmas:
+                # Polish numerals like "jeden" are tagged as adj in some forms (e.g. "jednej")
+                candidates["num"] = base
             elif pos == "subst" and base in self.multiplier_lemmas:
                 candidates["subst"] = base
             elif pos == "subst" and base in self.percent_lemmas:
@@ -710,18 +725,102 @@ class PolishNumberNormalizer:
                 return value
         return None
 
+    def _fraction_numerator_value(self, word: str) -> int | None:
+        """Return cardinal value for fraction numerator via Morfeusz.
+
+        Supports declined forms (e.g. "jednej" -> 1, "dwóch" -> 2) and
+        broader range (11-19, 20-90) via Morfeusz lemmatization.
+        Restricted to <100 to avoid colliding with ordinal compounds like
+        "sto dwudziesty" -> 120. (which is ordinal, not fraction 100/20)
+        """
+        # direct feminine dict (fast path, includes ASCII variants)
+        if word in self.fraction_numerators:
+            return self.fraction_numerators[word]
+        # direct cardinal maps (covers 1-19, tens, zero + ASCII) – exclude hundreds to avoid ordinal compound misclassify
+        if word in self.ones:
+            v = self.ones[word]
+            if v < 100:
+                return v
+        if word in self.tens:
+            v = self.tens[word]
+            if v < 100:
+                return v
+        if word in self.zeros:
+            return 0
+        # via Morfeusz – handle declensions like "jednej" -> "jeden" (adj)
+        for base, _pos in self.lemmatizer.analyse(word):
+            if base in self.fraction_numerators:
+                return self.fraction_numerators[base]
+            if base in self.ones:
+                v = self.ones[base]
+                if v < 100:
+                    return v
+            if base in self.tens:
+                v = self.tens[base]
+                if v < 100:
+                    return v
+            if base in self.zeros:
+                return 0
+        # fallback diacritic-less declined map (e.g. "pieciu" -> "pięć")
+        mapped = self._declined_ascii_map.get(word)
+        if mapped is not None:
+            if mapped in self.fraction_numerators:
+                return self.fraction_numerators[mapped]
+            if mapped in self.ones:
+                v = self.ones[mapped]
+                if v < 100:
+                    return v
+            if mapped in self.tens:
+                v = self.tens[mapped]
+                if v < 100:
+                    return v
+            if mapped in self.zeros:
+                return 0
+        return None
+
+    def _parse_fraction_numerator(self, words: list[str], start: int) -> tuple[int, int] | None:
+        """Parse 1-2 word cardinal numerator at words[start:].
+
+        Handles "dwadzieścia trzy" -> 23 for fractions.
+        Returns (value, length) or None.
+        """
+        n = len(words)
+        # try 2-word tens + ones (e.g. "dwadzieścia trzy" -> 23)
+        if start + 1 < n:
+            v1 = self._fraction_numerator_value(words[start])
+            v2 = self._fraction_numerator_value(words[start + 1])
+            if v1 is not None and v2 is not None:
+                # tens 20-90 + ones 1-9
+                if v1 in {20, 30, 40, 50, 60, 70, 80, 90} and 1 <= v2 <= 9:
+                    return v1 + v2, 2
+                # also handle "sto dwadzieścia" etc not needed for fractions but allow hundreds?
+                if v1 == 100 and v2 in {20, 30, 40, 50, 60, 70, 80, 90, *range(1, 20)}:
+                    # "sto dwadzieścia" -> 120 (rare as numerator)
+                    return v1 + v2, 2
+        # single word
+        v = self._fraction_numerator_value(words[start])
+        if v is not None:
+            return v, 1
+        return None
+
     def _convert_fractions(self, words: list[str]) -> list[str]:
-        """Turn "jedna trzecia" -> "1/3", "trzy czwarte" -> "3/4", etc."""
-        result = []
+        """Turn "jedna trzecia" -> "1/3", "trzy czwarte" -> "3/4", etc.
+
+        Uses Morfeusz for declined numerators (e.g. "jednej trzeciej" -> "1/3",
+        "dwóch trzecich" -> "2/3") and supports broader range (11-19) and
+        multi-word numerators like "dwadzieścia trzy setne" -> "23/100".
+        """
+        result: list[str] = []
         i = 0
         n = len(words)
         while i < n:
-            numerator = self.fraction_numerators.get(words[i])
-            if numerator is not None and i + 1 < n:
-                denominator = self._fraction_denominator(words[i + 1])
+            parsed = self._parse_fraction_numerator(words, i)
+            if parsed is not None and i + parsed[1] < n:
+                numerator, length = parsed
+                denominator = self._fraction_denominator(words[i + length])
                 if denominator is not None:
                     result.append(f"{numerator}/{denominator}")
-                    i += 2
+                    i += length + 1
                     continue
             result.append(words[i])
             i += 1

@@ -31,7 +31,7 @@ jobs:
       - name: Check if version already on PyPI
         id: check
         run: |
-          PKG=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          PKG=$(uv run python -c "import re; print(re.search(r'version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read()).group(1))")
           echo "version=$PKG" >> $GITHUB_OUTPUT
           if uv run --with requests python -c "import sys, requests; r=requests.get(f'https://pypi.org/pypi/polish-whisper-normalizer/{sys.argv[1]}/json', timeout=10); sys.exit(0 if r.status_code==200 else 1)" "$PKG"; then
             echo "exists=true" >> $GITHUB_OUTPUT

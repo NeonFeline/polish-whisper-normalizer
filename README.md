@@ -45,7 +45,7 @@ uv pip install polish-whisper-normalizer
 uv pip install "polish-whisper-normalizer[jiwer]"
 ```
 
-Requires **Python >=3.10**, `regex`, `more-itertools`, `morfeusz2`.
+Requires **Python >=3.10**, `regex`, `morfeusz2`.
 
 ### Quickstart
 
@@ -163,7 +163,7 @@ Full API: **[neonfeline.github.io/polish-whisper-normalizer](https://neonfeline.
 
 ```bash
 uv sync --group dev
-uv run pytest -q          # 600 tests
+uv run pytest -q          # 600+ tests
 uv run mypy src           # strict, py.typed
 uv run ruff check src tests && uv run ruff format --check src tests
 uv build

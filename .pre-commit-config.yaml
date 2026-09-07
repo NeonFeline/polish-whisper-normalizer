@@ -11,6 +11,7 @@ repos:
       - id: mypy
         args: [src]
         files: ^src/
+        pass_filenames: false
         additional_dependencies: [types-regex]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -29,4 +30,4 @@ repos:
         always_run: false
         verbose: false
         stages: [pre-commit]
-        files: ^(src/|pyproject\.toml)
+        files: ^(src/|pyproject\.toml|README\.md)

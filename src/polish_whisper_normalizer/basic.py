@@ -4,7 +4,8 @@ from collections.abc import Callable
 
 import regex
 
-# non-ASCII letters that are not separated by "NFKD" normalization
+# non-ASCII letters that are not decomposed by NFKD (inherited from Whisper english.py).
+# Polish requires ł/Ł; others kept for compatibility with mixed-language ASR.
 ADDITIONAL_DIACRITICS = {
     "œ": "oe",
     "Œ": "OE",
@@ -28,7 +29,9 @@ ADDITIONAL_DIACRITICS = {
 def remove_symbols_and_diacritics(s: str, keep: str = "") -> str:
     """
     Replace any other markers, symbols, and punctuations with a space,
-    and drop any diacritics (category 'Mn' and some manual mappings)
+    and drop any diacritics (category 'Mn' and some manual mappings).
+    Uses NFKD to decompose diacritics; manual ADDITIONAL_DIACRITICS handles
+    chars not decomposed (e.g. ł).
     """
     return "".join(
         (
@@ -53,7 +56,7 @@ def remove_symbols_and_diacritics(s: str, keep: str = "") -> str:
 def remove_symbols(s: str, keep: str = "") -> str:
     """
     Replace any other markers, symbols, punctuations with a space, keeping diacritics
-    (and any characters listed in `keep`)
+    (and any characters listed in `keep`). Uses NFKC to keep composed diacritics intact.
     """
     return "".join(
         c if c in keep else (" " if unicodedata.category(c)[0] in "MSP" else c)

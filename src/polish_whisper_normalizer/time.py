@@ -7,7 +7,9 @@ without duplicating dictionaries.
 
 from __future__ import annotations
 
+import copy
 import re
+import threading
 import uuid
 
 from .utils import with_ascii_variants
@@ -28,10 +30,19 @@ class PolishTimeNormalizer:
 
     # class-level cache: built once, reused by all instances
     _CACHE: dict[str, object] | None = None
+    _CACHE_LOCK = threading.Lock()
 
     def __init__(self) -> None:
         if PolishTimeNormalizer._CACHE is not None:
-            self.__dict__.update(PolishTimeNormalizer._CACHE)  # type: ignore[arg-type]
+            # deepcopy mutable containers to avoid cross-instance mutation
+            cached = PolishTimeNormalizer._CACHE
+            for key, value in cached.items():
+                if isinstance(value, (dict, set, list)):  # noqa: UP038
+                    self.__dict__[key] = copy.deepcopy(value)
+                elif hasattr(value, "pattern"):  # compiled regex
+                    self.__dict__[key] = value
+                else:
+                    self.__dict__[key] = value
             return
 
         self.hours = {
@@ -129,8 +140,10 @@ class PolishTimeNormalizer:
             r"\bod\s+(" + hours_gen_alt + r")\s+do\s+(" + hours_gen_alt + r")\b"
         )
 
-        # cache for next instance
-        PolishTimeNormalizer._CACHE = dict(self.__dict__)
+        # cache for next instance (thread-safe)
+        with PolishTimeNormalizer._CACHE_LOCK:
+            if PolishTimeNormalizer._CACHE is None:
+                PolishTimeNormalizer._CACHE = dict(self.__dict__)
 
     @staticmethod
     def _ones_words() -> list[str]:
@@ -196,9 +209,18 @@ class PolishTimeNormalizer:
         return minutes
 
     @staticmethod
+    def _norm_phrase(s: str) -> str:
+        return " ".join(s.split())
+
+    @staticmethod
     def _alternation(mapping: dict[str, int]) -> str:
         keys = sorted(mapping.keys(), key=lambda w: (-len(w), -w.count(" ")))
-        return "|".join(re.escape(k) for k in keys)
+
+        def _escape_phrase(phrase: str) -> str:
+            # allow flexible whitespace between words (single vs double spaces)
+            return r"\s+".join(re.escape(part) for part in phrase.split())
+
+        return "|".join(_escape_phrase(k) for k in keys)
 
     def __call__(self, s: str) -> str:
         # protect geographic "na północ/południe" (south/north) – keep as words
@@ -207,7 +229,8 @@ class PolishTimeNormalizer:
 
         def _protect_geo(m: re.Match[str]) -> str:
             # use UUID placeholder that cannot collide with user input
-            key = f"\x1fGEO_{uuid.uuid4().hex}\x1f"
+            # (no word chars that would match time patterns)
+            key = f"__GEO_{uuid.uuid4().hex}__"
             _geo_map[key] = m.group(0)
             return key
 
@@ -222,7 +245,9 @@ class PolishTimeNormalizer:
         for k, v in _geo_map.items():
             s = s.replace(k, v)
 
-        s = self._re_wpol.sub(lambda m: f"{(self.hours_gen[m.group(1)] - 1) % 24}:30", s)
+        s = self._re_wpol.sub(
+            lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
+        )
         # handle "o piątej rano" and "piąta rano" before generic "o piątej"
         s = self._re_o_hour_rano.sub(self._o_hour_rano_repl, s)
         s = self._re_hour_rano.sub(self._hour_rano_repl, s)
@@ -239,49 +264,49 @@ class PolishTimeNormalizer:
         return s
 
     def _za_repl(self, m: re.Match[str]) -> str:
-        minute = self.minutes[m.group(1)]
-        hour = self.hours[m.group(2)]
+        minute = self.minutes[self._norm_phrase(m.group(1))]
+        hour = self.hours[self._norm_phrase(m.group(2))]
         if minute <= 0 or minute >= 60:
             return m.group(0)
         return f"{(hour - 1) % 24}:{60 - minute:02d}"
 
     def _po_repl(self, m: re.Match[str]) -> str:
-        minute = self.minutes[m.group(1)]
-        hour = self.hours_gen[m.group(2)]
+        minute = self.minutes[self._norm_phrase(m.group(1))]
+        hour = self.hours_gen[self._norm_phrase(m.group(2))]
         return f"{hour}:{minute:02d}"
 
     def _godzina_min_repl(self, m: re.Match[str]) -> str:
-        hour = self.hours[m.group(1)]
-        minute = self.minutes[m.group(2)]
+        hour = self.hours[self._norm_phrase(m.group(1))]
+        minute = self.minutes[self._norm_phrase(m.group(2))]
         return f"{hour}:{minute:02d}"
 
     def _godzina_repl(self, m: re.Match[str]) -> str:
-        hour = self.hours[m.group(1)]
+        hour = self.hours[self._norm_phrase(m.group(1))]
         return f"{hour}:00"
 
     def _hour_min_repl(self, m: re.Match[str]) -> str:
-        hour = self.hours[m.group(1)]
-        minute = self.minutes[m.group(2)]
+        hour = self.hours[self._norm_phrase(m.group(1))]
+        minute = self.minutes[self._norm_phrase(m.group(2))]
         return f"{hour}:{minute:02d}"
 
     def _hour_gen_min_repl(self, m: re.Match[str]) -> str:
-        hour = self.hours_gen[m.group(1)]
-        minute = self.minutes[m.group(2)]
+        hour = self.hours_gen[self._norm_phrase(m.group(1))]
+        minute = self.minutes[self._norm_phrase(m.group(2))]
         return f"{hour}:{minute:02d}"
 
     def _o_hour_repl(self, m: re.Match[str]) -> str:
-        hour = self.hours_gen[m.group(1)]
+        hour = self.hours_gen[self._norm_phrase(m.group(1))]
         return f"o {hour}:00"
 
     def _o_hour_rano_repl(self, m: re.Match[str]) -> str:
-        hour = self.hours_gen[m.group(1)]
+        hour = self.hours_gen[self._norm_phrase(m.group(1))]
         return f"o {hour}:00 rano"
 
     def _hour_rano_repl(self, m: re.Match[str]) -> str:
-        hour = self.hours[m.group(1)]
+        hour = self.hours[self._norm_phrase(m.group(1))]
         return f"{hour}:00 rano"
 
     def _range_repl(self, m: re.Match[str]) -> str:
-        start = self.hours_gen[m.group(1)]
-        end = self.hours_gen[m.group(2)]
+        start = self.hours_gen[self._norm_phrase(m.group(1))]
+        end = self.hours_gen[self._norm_phrase(m.group(2))]
         return f"od {start}:00 do {end}:00"

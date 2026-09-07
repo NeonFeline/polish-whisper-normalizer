@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from .basic import BasicTextNormalizer, remove_symbols, remove_symbols_and_diacritics
 from .polish import (
     PolishLemmatizer,
@@ -15,10 +13,13 @@ from .polish import (
 try:
     from .jiwer import PolishTransform, polish_transform
     from .jiwer import wer as polish_wer
-except ImportError:
-    PolishTransform: Any = None  # type: ignore[no-redef]
-    polish_transform: Any = None  # type: ignore[no-redef]
-    polish_wer: Any = None  # type: ignore[no-redef]
+
+    _HAS_JIWER = True
+except ImportError:  # pragma: no cover - jiwer optional
+    PolishTransform = None  # type: ignore[assignment,misc]
+    polish_transform = None  # type: ignore[assignment,misc]
+    polish_wer = None  # type: ignore[assignment,misc]
+    _HAS_JIWER = False
 
 try:
     from importlib.metadata import version as _get_version

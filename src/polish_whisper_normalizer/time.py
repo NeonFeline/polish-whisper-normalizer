@@ -37,7 +37,7 @@ class PolishTimeNormalizer:
             # deepcopy mutable containers to avoid cross-instance mutation
             cached = PolishTimeNormalizer._CACHE
             for key, value in cached.items():
-                if isinstance(value, (dict, set, list)):  # noqa: UP038
+                if isinstance(value, dict | set | list):
                     self.__dict__[key] = copy.deepcopy(value)
                 elif hasattr(value, "pattern"):  # compiled regex
                     self.__dict__[key] = value

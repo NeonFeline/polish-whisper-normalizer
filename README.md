@@ -8,9 +8,9 @@
   <a href="https://neonfeline.github.io/polish-whisper-normalizer/"><img alt="Docs" src="https://img.shields.io/badge/docs-MkDocs-blueviolet"></a>
 </p>
 
-> **Polish port of [OpenAI Whisper](https://github.com/openai/whisper) normalizers** — keeps `ąćęłńóśźż`, normalizes numbers/time/currency/dates with **Morfeusz2** declensions.
+> **Polish port of [OpenAI Whisper](https://github.com/openai/whisper) normalizers** — preserves `ąćęłńóśźż`, normalizes numbers, time, currency, dates and declensions via **Morfeusz2**.
 
-[🇬🇧 English](#english) | [🇵🇱 Polski](#polski)
+[English](#english) | [Polski](#polski)
 
 ---
 
@@ -29,10 +29,10 @@
 | **Currency** | `pięć złotych`, `€10`, `pięć złotówek` | `5 zł`, `10 €`, `5 zł` |
 | **Percent** | `pięć procentów` | `5%` |
 | **Ordinal multipliers** | `tysiąc dziewięćsetny` | `1900.` |
-| **Dates** ✨ | `5 maja` → `05.05` · `piątego maja` → `05.05` · `piątego maja 2026` → `05.05.2026` · `piątego maja roku dwa tysiące dwudziestego szóstego` → `05.05.2026` | `DD.MM` / `DD.MM.YYYY` zero-padded, **conditional** (`maja` alone stays `maja`, avoids `Maja`→`5`) |
+| **Dates** | `5 maja` → `05.05` · `piątego maja` → `05.05` · `piątego maja 2026` → `05.05.2026` · `piątego maja roku dwa tysiące dwudziestego szóstego` → `05.05.2026` | `DD.MM` / `DD.MM.YYYY` zero-padded, conditional (`maja` alone stays `maja`, avoids `Maja`→`5`) |
 | **Geographic guard** | `na północ` stays, `jest północ` → `jest 0:00` | no false `0:00` for north |
 
-**Pipeline:** `lower → brackets/parens → time → decimal `,`→`.` → `remove_symbols(keep=".:/%$€£¢+-")` → `numbers` → `months (conditional)` → `dates` → cleanup. Configurable via `PolishTextNormalizer(date_format=...)`.
+**Pipeline:** `lower → brackets/parens → time → decimal ,→. → remove_symbols(keep=".:/%$€£¢+-") → numbers → months (conditional) → dates → cleanup`. Configurable via `PolishTextNormalizer(date_format=...)`. Diacritic-less ASR (`czterdziesci`, `piec`) is handled automatically.
 
 ### Installation
 
@@ -45,9 +45,9 @@ uv pip install polish-whisper-normalizer
 uv pip install "polish-whisper-normalizer[jiwer]"
 ```
 
-Requires **Python ≥3.10**, `regex`, `more-itertools`, `morfeusz2`.
+Requires **Python >=3.10**, `regex`, `more-itertools`, `morfeusz2`.
 
-### Usage
+### Quickstart
 
 ```python
 from polish_whisper_normalizer import PolishTextNormalizer, BasicTextNormalizer
@@ -57,7 +57,7 @@ n("Było piętnaście po piątej, minus dziesięć stopni.")
 # → "było 5:15 -10 stopni"
 
 n("Spotkanie dwudziestego pierwszego maja o piętnastej trzydzieści.")
-# → "spotkanie 21.05 o 15:30"   # was "21. 5" before 05.05 fix
+# → "spotkanie 21.05 o 15:30"
 
 n("piątego maja roku dwa tysiące dwudziestego szóstego")
 # → "05.05.2026"   # uniform, no trailing "r"
@@ -77,17 +77,8 @@ PolishTextNormalizer(date_format="{day}/{month}/{year}")("piątego maja 2026")
 # diacritics
 BasicTextNormalizer()("Żółć!")  # → "żółć"
 BasicTextNormalizer(remove_diacritics=True)("Żółć!")  # → "zolc"
-
-# jiwer WER (words→digits, dates, time normalized before WER)
-# pip install polish-whisper-normalizer[jiwer]
-import jiwer
-from polish_whisper_normalizer.jiwer import wer, PolishTransform, polish_transform
-wer("piątego maja 2026", "05.05.2026")  # → 0.0  (raw jiwer.wer → 1.0)
-jiwer.wer("piątego maja 2026", "05.05.2026",
-          reference_transform=polish_transform,
-          hypothesis_transform=polish_transform)  # → 0.0
-# custom date_format
-wer("piątego maja 2026", "2026-05-05", date_format="%Y-%m-%d")  # → 0.0
+# diacritic-less numbers also work
+PolishTextNormalizer()("trzysta czterdziesci osiem")  # → "348"
 ```
 
 ### Jiwer — WER with Polish normalization
@@ -98,7 +89,7 @@ uv pip install "polish-whisper-normalizer[jiwer]"
 uv sync --extra jiwer
 ```
 
-Without normalization `jiwer.wer` penalizes `piątego maja 2026` vs `05.05.2026` as 100 % error. With `PolishTransform` they match:
+Without normalization `jiwer.wer` penalizes `piątego maja 2026` vs `05.05.2026` as 100% error. With `PolishTransform` they match:
 
 ```python
 import jiwer
@@ -127,6 +118,22 @@ jiwer.wer("piątego maja 2026", "2026-05-05",
 ```
 
 `PolishTransform` wraps `PolishTextNormalizer` (`date_format` kwarg supported) and returns `str`; `polish_transform` is the ready `Compose` ending with `ReduceToListOfListOfWords` required by `jiwer.wer`.
+
+### Architecture
+
+```
+src/polish_whisper_normalizer/
+  basic.py        # Whisper basic normalizer, diacritics-aware
+  lemmatizer.py   # PolishLemmatizer – thin Morfeusz2 wrapper (analyse/generate)
+  utils.py        # strip_diacritics, with_ascii_variants – single place for ASCII fallback
+  numbers.py      # PolishNumberNormalizer – cardinals/ordinals/currency/percent
+  time.py         # PolishTimeNormalizer – HH:MM, wpół/za/po, geographic guard
+  text.py         # PolishTextNormalizer – full pipeline: time → numbers → months → dates
+  polish.py       # compatibility re-export shim
+  jiwer.py        # PolishTransform / wer helper
+```
+
+Declension is never re-implemented: base nominative lexicons are stored, all declined forms are resolved via `PolishLemmatizer.analyse` and `generate` (Morfeusz2). ASCII-folded variants are derived once via `utils` and `Morfeusz.generate`, so diacritic-less ASR needs no duplicated dictionaries.
 
 <details><summary>Components</summary>
 
@@ -165,7 +172,7 @@ mkdocs serve
 
 - `py.typed` + `mypy --strict` (`warn_unused_ignores=false`)
 - `ruff` + `pre-commit` + GitHub Actions (`ci.yml`: lint → mypy → pytest --cov → build)
-- Validated on **BIGOS v2 + PELCRA** (2397 samples, ~5 % number words)
+- Validated on **BIGOS v2 + PELCRA** (2397 samples, ~5% number words)
 
 ### License
 
@@ -182,7 +189,7 @@ MIT — see `LICENSE` (inherits Whisper MIT for `basic.py`).
 | **Znaki diakrytyczne** | `Żółć!` | `żółć` (zachowane) |
 | **Liczebniki** | `sto dwadzieścia trzy`, `pierwszego` | `123`, `1.` |
 | **Czas** | `piąta trzydzieści`, `o piątej`, `od piątej do szóstej` | `5:30`, `o 5:00`, `od 5:00 do 6:00` |
-| **Daty** ✨ | `5 maja` → `05.05` · `piątego maja 2026` → `05.05.2026` | `DD.MM` / `DD.MM.RRRR`, **warunkowo** (`maja` samo → `maja`) |
+| **Daty** | `5 maja` → `05.05` · `piątego maja 2026` → `05.05.2026` | `DD.MM` / `DD.MM.RRRR`, warunkowo (`maja` samo → `maja`) |
 | **Waluta / procent / ułamki** | `pięć złotówek`, `procentów`, `1/3`, `pół litra` | `5 zł`, `5%`, `1/3`, `0.5 litra` |
 
 **Potok:** `lower → czas → liczby → miesiące (warunkowo) → daty`.
@@ -208,6 +215,10 @@ n("5 maja")  # też działa
 # własny format daty
 PolishTextNormalizer(date_format="%Y-%m-%d")("piątego maja 2026")
 # → "2026-05-05"
+
+# bez znaków diakrytycznych też działa
+n("trzysta czterdziesci osiem")
+# → "348"
 ```
 
 `maja` jako imię `Maja` zostaje `maja` (nie `5`), `na północ` nie staje się `0:00`.

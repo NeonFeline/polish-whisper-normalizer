@@ -8,6 +8,7 @@ without duplicating dictionaries.
 from __future__ import annotations
 
 import re
+import uuid
 
 from .utils import with_ascii_variants
 
@@ -25,8 +26,13 @@ class PolishTimeNormalizer:
     - "północ" -> "0:00", "południe" -> "12:00"
     """
 
+    # class-level cache: built once, reused by all instances
+    _CACHE: dict[str, object] | None = None
+
     def __init__(self) -> None:
-        super().__init__()
+        if PolishTimeNormalizer._CACHE is not None:
+            self.__dict__.update(PolishTimeNormalizer._CACHE)  # type: ignore[arg-type]
+            return
 
         self.hours = {
             "pierwsza": 1,
@@ -123,6 +129,9 @@ class PolishTimeNormalizer:
             r"\bod\s+(" + hours_gen_alt + r")\s+do\s+(" + hours_gen_alt + r")\b"
         )
 
+        # cache for next instance
+        PolishTimeNormalizer._CACHE = dict(self.__dict__)
+
     @staticmethod
     def _ones_words() -> list[str]:
         return [
@@ -175,7 +184,7 @@ class PolishTimeNormalizer:
                 return tens[t]
             return tens[t] + " " + ones[o]
 
-        minutes = {}
+        minutes: dict[str, int] = {}
         for m in range(60):
             minutes[cardinal(m)] = m
         for d in range(10):
@@ -197,7 +206,8 @@ class PolishTimeNormalizer:
         _geo_map: dict[str, str] = {}
 
         def _protect_geo(m: re.Match[str]) -> str:
-            key = f"__GEO_{len(_geo_map)}__"
+            # use UUID placeholder that cannot collide with user input
+            key = f"\x1fGEO_{uuid.uuid4().hex}\x1f"
             _geo_map[key] = m.group(0)
             return key
 

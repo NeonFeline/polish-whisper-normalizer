@@ -12,10 +12,14 @@ import re
 from collections.abc import Iterator
 from fractions import Fraction
 
-from more_itertools import windowed
-
 from .lemmatizer import PolishLemmatizer
 from .utils import strip_diacritics, with_ascii_variants, with_ascii_variants_set
+
+
+def _windowed_3(seq: list[str | None]) -> Iterator[tuple[str | None, str | None, str | None]]:
+    """Lightweight windowed(3) to avoid more-itertools dependency."""
+    for i in range(len(seq) - 2):
+        yield (seq[i], seq[i + 1], seq[i + 2])  # type: ignore[misc]
 
 
 class PolishNumberNormalizer:
@@ -347,8 +351,6 @@ class PolishNumberNormalizer:
 
         self.lemmatizer = PolishLemmatizer()
         self._canon_cache: dict[str, str] = {}
-        # cache for ASCII-folded declined forms -> base lemma
-        self._ascii_declined_cache: dict[str, str | None] = {}
         # map stripped declined forms -> original base lemma (for diacritic-less declensions)
         self._declined_ascii_map: dict[str, str] = {}
         # build it from morfeusz generate() using original lemmas (with diacritics)
@@ -361,23 +363,19 @@ class PolishNumberNormalizer:
             | _orig_month
         )
         if self.lemmatizer.morf is not None:
-            try:
-                morf = self.lemmatizer.morf
-                for base in _all_orig_bases:
-                    try:
-                        forms = morf.generate(base)  # type: ignore[union-attr]
-                    except Exception:
+            for base in _all_orig_bases:
+                try:
+                    forms = self.lemmatizer.generate(base)
+                except Exception:
+                    continue
+                for surface, lemma, _tag in forms:
+                    # lemma may contain ":Sm2" suffix for nouns – strip
+                    clean_lemma = lemma.split(":")[0]
+                    if clean_lemma != base:
                         continue
-                    for form, lemma, _tag, _a, _b in forms:
-                        # lemma may contain ":Sm2" suffix for nouns – strip
-                        clean_lemma = lemma.split(":")[0]
-                        if clean_lemma != base:
-                            continue
-                        stripped_form = strip_diacritics(form)
-                        if stripped_form != form and stripped_form not in self._declined_ascii_map:
-                            self._declined_ascii_map[stripped_form] = base
-            except Exception:
-                pass
+                    stripped_form = strip_diacritics(surface)
+                    if stripped_form != surface and stripped_form not in self._declined_ascii_map:
+                        self._declined_ascii_map[stripped_form] = base
 
     def _canonicalize(self, word: str) -> str:
         """Map a declined number word to its base lemma, if it is one."""
@@ -416,12 +414,6 @@ class PolishNumberNormalizer:
         # fallback: diacritic-less declined form (e.g. "pieciu" -> "pięć")
         if result == word and word in self._declined_ascii_map:
             result = self._declined_ascii_map[word]
-        if result == word:
-            stripped = strip_diacritics(word)
-            if stripped != word:
-                pass
-            else:
-                pass
         self._canon_cache[word] = result
         return result
 
@@ -452,7 +444,7 @@ class PolishNumberNormalizer:
         if len(words) == 0:
             return
 
-        for prev, current, next in windowed([None] + words + [None], 3):
+        for prev, current, next in _windowed_3([None, *words, None]):  # type: ignore[list-item]
             if skip:
                 skip = False
                 continue
@@ -473,10 +465,7 @@ class PolishNumberNormalizer:
                         yield output(value)  # type: ignore[arg-type]
 
                 prefix = current[0] if has_prefix else prefix  # type: ignore[index]
-                if f.denominator == 1:
-                    value = f.numerator
-                else:
-                    value = current_without_prefix
+                value = f.numerator if f.denominator == 1 else current_without_prefix
             elif current not in self.words:
                 # non-numeric words
                 if value is not None:

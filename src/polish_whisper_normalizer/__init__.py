@@ -1,3 +1,9 @@
+"""Polish Whisper Normalizer – public API."""
+
+from __future__ import annotations
+
+from typing import Any
+
 from .basic import BasicTextNormalizer, remove_symbols, remove_symbols_and_diacritics
 from .polish import (
     PolishLemmatizer,
@@ -10,9 +16,16 @@ try:
     from .jiwer import PolishTransform, polish_transform
     from .jiwer import wer as polish_wer
 except ImportError:
-    PolishTransform = None  # type: ignore
-    polish_transform = None  # type: ignore
-    polish_wer = None  # type: ignore
+    PolishTransform: Any = None  # type: ignore[no-redef]
+    polish_transform: Any = None  # type: ignore[no-redef]
+    polish_wer: Any = None  # type: ignore[no-redef]
+
+try:
+    from importlib.metadata import version as _get_version
+
+    __version__ = _get_version("polish-whisper-normalizer")
+except Exception:
+    __version__ = "0.0.0"
 
 __all__ = [
     "BasicTextNormalizer",
@@ -21,6 +34,7 @@ __all__ = [
     "PolishTextNormalizer",
     "PolishTimeNormalizer",
     "PolishTransform",
+    "__version__",
     "polish_transform",
     "polish_wer",
     "remove_symbols",

@@ -3,13 +3,24 @@ name = "polish-whisper-normalizer"
 version = "0.1.5"
 description = "Polish text normalizer for Whisper ASR output (keeps diacritics, normalizes numbers, time, currency)"
 readme = "README.md"
+license = { text = "MIT" }
+keywords = ["whisper", "asr", "polish", "normalization", "nlp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 authors = [
     { name = "NeonFeline", email = "maciejlachut77@gmail.com" }
 ]
 requires-python = ">=3.10"
 dependencies = [
     "regex",
-    "more-itertools",
     "morfeusz2",
 ]
 
@@ -29,12 +40,15 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.11.19,<0.12.0"]
+requires = ["uv_build>=0.8,<1.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+cache-keys = [{ git = true }]
 
 [tool.mypy]
 python_version = "3.10"
-ignore_missing_imports = true
+ignore_missing_imports = false
 warn_unused_ignores = false
 warn_redundant_casts = true
 warn_unused_configs = true
@@ -49,13 +63,23 @@ no_implicit_optional = true
 module = "morfeusz2.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "regex.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "jiwer.*"
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "C4", "UP"]
-ignore = ["E501"]
+select = ["E", "F", "I", "B", "C4", "UP", "SIM", "RUF"]
+ignore = ["E501", "RUF001", "RUF002", "RUF003"]
+# allow non-critical SIM/RUF to be fixable without blocking CI
+unfixable = []
 
 [tool.ruff.format]
 quote-style = "double"

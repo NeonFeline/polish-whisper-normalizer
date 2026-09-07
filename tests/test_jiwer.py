@@ -1,7 +1,7 @@
 import pytest
 
 try:
-    import jiwer  # noqa: F401
+    import jiwer
 
     from polish_whisper_normalizer.jiwer import PolishTransform, polish_transform, wer
 

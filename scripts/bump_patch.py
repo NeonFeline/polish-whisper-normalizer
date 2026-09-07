@@ -10,7 +10,26 @@ from pathlib import Path
 
 PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
-pattern = re.compile(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', re.MULTILINE)
+# only match version inside [project] section to avoid bumping dependencies
+_PROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', re.MULTILINE)
+
+
+def _find_project_version(text: str) -> tuple[re.Match[str] | None, str, str]:
+    """Return (match, before, project_section) for version inside [project]."""
+    if "[project]" not in text:
+        return None, text, ""
+    before, rest = text.split("[project]", 1)
+    # project section ends at next top-level header [xxx]
+    # find next "\n[" after rest
+    end = rest.find("\n[")
+    if end == -1:
+        section = rest
+        after = ""
+    else:
+        section = rest[:end]
+        after = rest[end:]
+    m = _PROJECT_VERSION_RE.search(section)
+    return m, before, section + after  # keep after for reconstruction
 
 
 def bump() -> bool:
@@ -26,15 +45,29 @@ def bump() -> bool:
     except Exception:
         pass
     text = PYPROJECT.read_text(encoding="utf-8")
-    m = pattern.search(text)
+    if "[project]" not in text:
+        print("bump_patch: no [project] found", file=sys.stderr)
+        return False
+    # isolate [project] section
+    before, rest = text.split("[project]", 1)
+    # find next section
+    next_header = rest.find("\n[")
+    if next_header == -1:
+        project_section = rest
+        after = ""
+    else:
+        project_section = rest[:next_header]
+        after = rest[next_header:]
+    m = _PROJECT_VERSION_RE.search(project_section)
     if not m:
-        print("bump_patch: no version found", file=sys.stderr)
+        print("bump_patch: no version found in [project]", file=sys.stderr)
         return False
     major, minor, patch = map(int, m.groups())
     new_version = f"{major}.{minor}.{patch + 1}"
-    new_text = pattern.sub(f'version = "{new_version}"', text, count=1)
-    if new_text == text:
+    new_section = _PROJECT_VERSION_RE.sub(f'version = "{new_version}"', project_section, count=1)
+    if new_section == project_section:
         return False
+    new_text = before + "[project]" + new_section + after
     PYPROJECT.write_text(new_text, encoding="utf-8")
     print(f'bump_patch: {m.group(0).strip()} -> version = "{new_version}"')
     # re-stage file so commit includes the bump

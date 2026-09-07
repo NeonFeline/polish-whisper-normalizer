@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class PolishLemmatizer:
         self._morf_failed: bool = False
         self._cache: dict[str, list[tuple[str, str]]] = {}
         self._gen_cache: dict[str, list[tuple[str, str, str]]] = {}
+        self._lock = threading.Lock()
 
     @property
     def morf(self) -> Any | None:
@@ -31,19 +33,24 @@ class PolishLemmatizer:
             return self._morf
         if self._morf_failed:
             return None
-        try:
-            import morfeusz2
+        with self._lock:
+            if self._morf is not None:
+                return self._morf
+            if self._morf_failed:
+                return None
+            try:
+                import morfeusz2
 
-            self._morf = morfeusz2.Morfeusz()
-        except ImportError:
-            logger.debug("morfeusz2 not installed – lemmatizer disabled")
-            self._morf_failed = True
-            return None
-        except Exception as exc:  # pragma: no cover – unexpected Morfeusz init error
-            logger.warning("Failed to initialize Morfeusz: %s", exc)
-            self._morf_failed = True
-            return None
-        return self._morf
+                self._morf = morfeusz2.Morfeusz()
+            except ImportError:
+                logger.debug("morfeusz2 not installed – lemmatizer disabled")
+                self._morf_failed = True
+                return None
+            except Exception as exc:  # pragma: no cover – unexpected Morfeusz init error
+                logger.warning("Failed to initialize Morfeusz: %s", exc)
+                self._morf_failed = True
+                return None
+            return self._morf
 
     def analyse(self, word: str) -> list[tuple[str, str]]:
         """Return a list of (base_lemma, part_of_speech) tuples."""

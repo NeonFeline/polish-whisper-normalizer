@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import datetime
+import logging
 import re
-import warnings
 
 from .basic import remove_symbols
 from .numbers import PolishNumberNormalizer
 from .time import PolishTimeNormalizer
+
+logger = logging.getLogger(__name__)
 
 
 class PolishTextNormalizer:
@@ -16,6 +18,20 @@ class PolishTextNormalizer:
     _BRACKETS_RE = re.compile(r"<[^>]*>|\[[^\]]*\]")
     _PAREN_RE = re.compile(r"\([^)]*\)")
     _WS_RE = re.compile(r"\s+")
+    _IGNORE_RE = re.compile(r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b")
+    _SENTENCE_PERIOD_RE = re.compile(r"(?<!\d)\.([^0-9]|$)")
+    _DECIMAL_COMMA_RE = re.compile(r"(\d),(\d)")
+    _MONTH_DAY_RE = re.compile(r"(\d+)\.?\s+([a-ząćęłńóśźż]+)\b")
+    _FULL_DATE_ROKU_BEFORE_RE = re.compile(r"(\d+)\.\s+(\d+)\s+(?:roku|r\.?)\s+(\d+)\.?")
+    _FULL_DATE_ROKU_AFTER_RE = re.compile(r"(\d+)\.\s+(\d+)\s+(\d+)\.?\s+(?:roku|r\.?)\b")
+    _FULL_DATE_RE = re.compile(r"(\d+)\.\s+(\d+)\s+(\d{4})\.?")
+    _TRAILING_R_RE1 = re.compile(r"(\d{2}\.\d{2}\.\d{4})\s+r\.?\b")
+    _TRAILING_R_RE2 = re.compile(r"(\d{2}\.\d{2}\.\d{4})r\.?\b")
+    _DAY_MONTH_RE = re.compile(r"(\d+)\.\s+(\d+)\b(?!\.)")
+    _PERCENT_RE = re.compile(r"([^0-9])%")
+    _COLON_RE = re.compile(r"(?<!\d):|:(?!\d)")
+    _SIGN_RE = re.compile(r"[-+](?!\d)")
+    _WANTS_R_RE = re.compile(r"\br\.?\b")
 
     def __init__(self, date_format: str = "{day:02d}.{month:02d}.{year}", **kwargs: object) -> None:
         """
@@ -27,16 +43,8 @@ class PolishTextNormalizer:
                 Default "{day:02d}.{month:02d}.{year}" -> "05.05.2026".
         """
         if kwargs:
-            if set(kwargs.keys()) == {"date_format"} and isinstance(kwargs["date_format"], str):
-                warnings.warn(
-                    "Passing date_format via **kwargs is deprecated, use positional arg",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                date_format = kwargs["date_format"]  # type: ignore[assignment]
-            else:
-                unexpected = ", ".join(sorted(kwargs.keys()))
-                raise TypeError(f"Unexpected keyword arguments: {unexpected}")
+            unexpected = ", ".join(sorted(kwargs.keys()))
+            raise TypeError(f"Unexpected keyword arguments: {unexpected}")
 
         self.ignore_patterns = r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b"
         self.standardize_numbers = PolishNumberNormalizer()
@@ -51,20 +59,21 @@ class PolishTextNormalizer:
         if has_brace:
             try:
                 return fmt.format(day=day, month=month, year=year)
-            except Exception:
+            except Exception as exc:
+                logger.debug("brace date_format failed for %r: %s", fmt, exc)
                 if not has_percent:
                     return f"{day:02d}.{month:02d}.{year}"
         if has_percent:
             try:
                 return datetime.datetime(year, month, day).strftime(fmt)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("strftime date_format failed for %r: %s", fmt, exc)
         # fallback: brace format if not tried
         if not has_brace:
             try:
                 return fmt.format(day=day, month=month, year=year)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("fallback brace format failed for %r: %s", fmt, exc)
         return f"{day:02d}.{month:02d}.{year}"
 
     def _month_number(self, word: str) -> str | None:
@@ -85,15 +94,15 @@ class PolishTextNormalizer:
 
         s = self._BRACKETS_RE.sub("", s)  # remove words between brackets
         s = self._PAREN_RE.sub("", s)  # remove words between parenthesis
-        s = re.sub(self.ignore_patterns, "", s)
+        s = self._IGNORE_RE.sub("", s)
 
         # remove sentence periods before digits are introduced by time/number
         # normalization; keep decimals ("3.14") and ordinal markers ("21.")
-        s = re.sub(r"(?<!\d)\.([^0-9]|$)", r" \1", s)
+        s = self._SENTENCE_PERIOD_RE.sub(r" \1", s)
 
         s = self.standardize_time(s)
 
-        s = re.sub(r"(\d),(\d)", r"\1.\2", s)  # Polish decimal comma -> point
+        s = self._DECIMAL_COMMA_RE.sub(r"\1.\2", s)  # Polish decimal comma -> point
         s = remove_symbols(
             s, keep=".:/%$€£¢+-"
         )  # keep numeric/time/sign/currency symbols + fraction slash
@@ -110,7 +119,7 @@ class PolishTextNormalizer:
                 return f"{day}. {month_num}"
             return m.group(0)
 
-        s = re.sub(r"(\d+)\.?\s+([a-ząćęłńóśźż]+)\b", _date_repl, s)
+        s = self._MONTH_DAY_RE.sub(_date_repl, s)
 
         # full date formatting: "5. 5 roku 2026." -> "05.05.2026", "5. 5 2026" -> "05.05.2026" (uniform, no r)
         def _full_date_roku_before(m: re.Match[str]) -> str:
@@ -130,13 +139,13 @@ class PolishTextNormalizer:
             return f"{int(day):02d}.{int(month):02d}"
 
         # order matters: most specific first (handle roku and r. uniformly)
-        s = re.sub(r"(\d+)\.\s+(\d+)\s+(?:roku|r\.?)\s+(\d+)\.?", _full_date_roku_before, s)
-        s = re.sub(r"(\d+)\.\s+(\d+)\s+(\d+)\.?\s+(?:roku|r\.?)\b", _full_date_roku_after, s)
-        s = re.sub(r"(\d+)\.\s+(\d+)\s+(\d{4})\.?", _full_date, s)
+        s = self._FULL_DATE_ROKU_BEFORE_RE.sub(_full_date_roku_before, s)
+        s = self._FULL_DATE_ROKU_AFTER_RE.sub(_full_date_roku_after, s)
+        s = self._FULL_DATE_RE.sub(_full_date, s)
         # uniform output: strip trailing r/r. only if date_format does not request it
         # detect literal 'r' in format (e.g. "%d.%m.%Yr." or "{day} r.")
         _wants_r = (
-            bool(re.search(r"\br\.?\b", self.date_format.lower())) if self.date_format else False
+            bool(self._WANTS_R_RE.search(self.date_format.lower())) if self.date_format else False
         )
         # legacy check for formats ending with r/r.
         if not _wants_r:
@@ -146,16 +155,16 @@ class PolishTextNormalizer:
                 or " r." in self.date_format.lower()
             )
         if not _wants_r:
-            s = re.sub(r"(\d{2}\.\d{2}\.\d{4})\s+r\.?\b", r"\1", s)
-            s = re.sub(r"(\d{2}\.\d{2}\.\d{4})r\.?\b", r"\1", s)
+            s = self._TRAILING_R_RE1.sub(r"\1", s)
+            s = self._TRAILING_R_RE2.sub(r"\1", s)
         # day month without year -> 5. 5 -> 05.05 (as requested)
         # only when month is not ordinal (no trailing dot) – avoids "1. 2." -> "01.02."
-        s = re.sub(r"(\d+)\.\s+(\d+)\b(?!\.)", _day_month, s)
+        s = self._DAY_MONTH_RE.sub(_day_month, s)
 
         # remove leftover symbols that are not part of a number/time
-        s = re.sub(r"([^0-9])%", r"\1 ", s)
-        s = re.sub(r"(?<!\d):|:(?!\d)", " ", s)
-        s = re.sub(r"[-+](?!\d)", " ", s)
+        s = self._PERCENT_RE.sub(r"\1 ", s)
+        s = self._COLON_RE.sub(" ", s)
+        s = self._SIGN_RE.sub(" ", s)
 
         s = self._WS_RE.sub(" ", s)  # replace successive whitespaces with a space
         return s.strip()

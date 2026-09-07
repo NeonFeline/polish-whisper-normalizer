@@ -8,12 +8,17 @@ ASCII-folded variants are generated automatically via ``utils`` + Morfeusz
 
 from __future__ import annotations
 
+import copy
+import logging
 import re
+import threading
 from collections.abc import Iterator
 from fractions import Fraction
 
 from .lemmatizer import PolishLemmatizer
 from .utils import strip_diacritics, with_ascii_variants, with_ascii_variants_set
+
+logger = logging.getLogger(__name__)
 
 
 def _windowed_3(seq: list[str | None]) -> Iterator[tuple[str | None, str | None, str | None]]:
@@ -36,6 +41,18 @@ class PolishNumberNormalizer:
       "pierwszego" -> "1.", "trzeciej" -> "3.")
     - declined cardinal forms ("pięciu" -> "5", "dwóm" -> "2", "tysiąca" -> "1000")
     """
+
+    # class-level shared state – built once, reused (thread-safe)
+    _CACHE: dict[str, object] | None = None
+    _CACHE_LOCK = threading.Lock()
+    _DECLINED_ASCII_CACHE: dict[str, str] | None = None
+    _DECLINED_LOCK = threading.Lock()
+
+    # pre-compiled patterns (avoid recompiling per token)
+    _POLISH_WORD_RE = re.compile(r"[a-ząćęłńóśźż]+")
+    _NUMERIC_RE = re.compile(r"^\d+(?:\.\d+)?$")
+    _NUMERIC_PREFIX_RE = re.compile(r"^\d")
+    _DIGIT_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
     def __init__(self) -> None:
         super().__init__()
@@ -294,6 +311,26 @@ class PolishNumberNormalizer:
         _orig_percent = set(self.percent_lemmas)
         _orig_currency = set(self.currency_lemmas)
         _orig_month = set(self.month_lemmas)
+        self._expand_ascii_variants()
+        # re-derive composite sets after expansion
+        self._rebuild_composite_sets()
+
+        self.lemmatizer = PolishLemmatizer()
+        self._canon_cache: dict[str, str] = {}
+        # map stripped declined forms -> original base lemma (for diacritic-less declensions)
+        # use class-level cache to avoid rebuilding via Morfeusz.generate on every instance
+        _all_orig_bases = (
+            _orig_cardinal
+            | _orig_multiplier
+            | _orig_ordinal
+            | _orig_percent
+            | _orig_currency
+            | _orig_month
+        )
+        self._declined_ascii_map = self._get_or_build_declined_map(_all_orig_bases, self.lemmatizer)
+
+    def _expand_ascii_variants(self) -> None:
+        """Expand lexicons with ASCII-folded variants for diacritic-less ASR."""
         self.zeros = with_ascii_variants_set(self.zeros)
         self.ones = with_ascii_variants(self.ones)
         self.tens = with_ascii_variants(self.tens)
@@ -311,7 +348,9 @@ class PolishNumberNormalizer:
         self.month_lemmas = with_ascii_variants(self.month_lemmas)
         self.percent_lemmas = with_ascii_variants_set(self.percent_lemmas)
         self.currency_lemmas = with_ascii_variants_set(self.currency_lemmas)
-        # re-derive composite sets after expansion
+
+    def _rebuild_composite_sets(self) -> None:
+        """Re-derive sets that depend on expanded lexicons."""
         self.words = {
             key
             for mapping in [
@@ -349,39 +388,38 @@ class PolishNumberNormalizer:
         self.decimals = {*self.ones, *self.tens, *self.zeros}
         self.prefixes = set(self.preceding_prefixers.values())
 
-        self.lemmatizer = PolishLemmatizer()
-        self._canon_cache: dict[str, str] = {}
-        # map stripped declined forms -> original base lemma (for diacritic-less declensions)
-        self._declined_ascii_map: dict[str, str] = {}
-        # build it from morfeusz generate() using original lemmas (with diacritics)
-        _all_orig_bases = (
-            _orig_cardinal
-            | _orig_multiplier
-            | _orig_ordinal
-            | _orig_percent
-            | _orig_currency
-            | _orig_month
-        )
-        if self.lemmatizer.morf is not None:
-            for base in _all_orig_bases:
+    @classmethod
+    def _get_or_build_declined_map(
+        cls, bases: set[str], lemmatizer: PolishLemmatizer
+    ) -> dict[str, str]:
+        """Return cached declined ASCII map or build via Morfeusz.generate."""
+        if cls._DECLINED_ASCII_CACHE is not None:
+            return copy.deepcopy(cls._DECLINED_ASCII_CACHE)
+        declined: dict[str, str] = {}
+        if lemmatizer.morf is not None:
+            for base in bases:
                 try:
-                    forms = self.lemmatizer.generate(base)
+                    forms = lemmatizer.generate(base)
                 except Exception:
+                    logger.debug("generate failed for %r", base)
                     continue
                 for surface, lemma, _tag in forms:
-                    # lemma may contain ":Sm2" suffix for nouns – strip
                     clean_lemma = lemma.split(":")[0]
                     if clean_lemma != base:
                         continue
                     stripped_form = strip_diacritics(surface)
-                    if stripped_form != surface and stripped_form not in self._declined_ascii_map:
-                        self._declined_ascii_map[stripped_form] = base
+                    if stripped_form != surface and stripped_form not in declined:
+                        declined[stripped_form] = base
+        with cls._DECLINED_LOCK:
+            if cls._DECLINED_ASCII_CACHE is None:
+                cls._DECLINED_ASCII_CACHE = copy.deepcopy(declined)
+        return declined
 
     def _canonicalize(self, word: str) -> str:
         """Map a declined number word to its base lemma, if it is one."""
         if word in self.words:
             return word
-        if not re.fullmatch(r"[a-ząćęłńóśźż]+", word):
+        if self._POLISH_WORD_RE.fullmatch(word) is None:
             return word
         cached = self._canon_cache.get(word)
         if cached is not None:
@@ -448,12 +486,14 @@ class PolishNumberNormalizer:
             if skip:
                 skip = False
                 continue
+            if current is None:  # type narrowing for mypy; never happens for non-empty words
+                continue
 
-            next_is_numeric = next is not None and re.match(r"^\d+(\.\d+)?$", next)  # type: ignore[arg-type]
-            has_prefix = current[0] in self.prefixes  # type: ignore[index]
+            next_is_numeric = next is not None and self._NUMERIC_RE.match(next) is not None
+            has_prefix = current[0] in self.prefixes
             current_without_prefix = current[1:] if has_prefix else current  # type: ignore[index]
 
-            if re.match(r"^\d+(\.\d+)?$", current_without_prefix):  # type: ignore[arg-type]
+            if self._NUMERIC_RE.match(current_without_prefix):  # type: ignore[arg-type]
                 # arabic numbers (potentially with signs/currency prefixes)
                 f = to_fraction(current_without_prefix)  # type: ignore[arg-type]
                 assert f is not None
@@ -612,7 +652,7 @@ class PolishNumberNormalizer:
                 # drop "i" only when it joins two numeric tokens
                 # (e.g. "sto złotych i pięćdziesiąt groszy" -> "100 zł 50 gr")
                 prev_numeric = prev is not None and (
-                    prev in self.words or re.match(r"^\d", prev or "")
+                    prev in self.words or self._NUMERIC_PREFIX_RE.match(prev or "") is not None
                 )
                 next_numeric = next in self.words or next_is_numeric
                 if prev_numeric and next_numeric:

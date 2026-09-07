@@ -1,6 +1,6 @@
 [project]
 name = "polish-whisper-normalizer"
-version = "0.1.5"
+version = "0.1.8"
 description = "Polish text normalizer for Whisper ASR output (keeps diacritics, normalizes numbers, time, currency)"
 readme = "README.md"
 license = { text = "MIT" }
@@ -91,6 +91,14 @@ addopts = "-q"
 [tool.coverage.run]
 source = ["src/polish_whisper_normalizer"]
 branch = true
+omit = ["src/polish_whisper_normalizer/jiwer.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise ImportError",
+]
 
 [project.urls]
 Homepage = "https://github.com/NeonFeline/polish-whisper-normalizer"

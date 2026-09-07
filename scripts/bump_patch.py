@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import subprocess
 import sys
@@ -11,7 +12,8 @@ from pathlib import Path
 PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 # only match version inside [project] section to avoid bumping dependencies
-_PROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', re.MULTILINE)
+# supports both " and ' quotes (defensive)
+_PROJECT_VERSION_RE = re.compile(r"^version\s*=\s*[\"'](\d+)\.(\d+)\.(\d+)[\"']", re.MULTILINE)
 
 
 def _find_project_version(text: str) -> tuple[re.Match[str] | None, str, str]:
@@ -34,16 +36,12 @@ def _find_project_version(text: str) -> tuple[re.Match[str] | None, str, str]:
 
 def bump() -> bool:
     # Only bump when there's a staged commit (avoid bump on `pre-commit run --all-files`)
-    try:
+    with contextlib.suppress(Exception):
         # git diff --cached --quiet returns 0 if no staged changes
         result = subprocess.run(["git", "diff", "--cached", "--quiet"], check=False)
-        if result.returncode == 0:
+        if result.returncode == 0 and "--force" not in sys.argv:
             # No staged changes -> not a real commit, skip bump
-            # Allow manual `python scripts/bump_patch.py` to still bump when passed --force
-            if "--force" not in sys.argv:
-                return False
-    except Exception:
-        pass
+            return False
     text = PYPROJECT.read_text(encoding="utf-8")
     if "[project]" not in text:
         print("bump_patch: no [project] found", file=sys.stderr)
@@ -71,10 +69,8 @@ def bump() -> bool:
     PYPROJECT.write_text(new_text, encoding="utf-8")
     print(f'bump_patch: {m.group(0).strip()} -> version = "{new_version}"')
     # re-stage file so commit includes the bump
-    try:
+    with contextlib.suppress(Exception):
         subprocess.run(["git", "add", str(PYPROJECT)], check=False)
-    except Exception:
-        pass
     return True
 
 

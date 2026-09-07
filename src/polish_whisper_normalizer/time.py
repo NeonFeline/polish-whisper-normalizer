@@ -12,7 +12,7 @@ import re
 import threading
 import uuid
 
-from .utils import with_ascii_variants
+from .utils import strip_diacritics, with_ascii_variants
 
 
 class PolishTimeNormalizer:
@@ -95,6 +95,7 @@ class PolishTimeNormalizer:
             "dwudziestej pierwszej": 21,
             "dwudziestej drugiej": 22,
             "dwudziestej trzeciej": 23,
+            "dwudziestej czwartej": 24,
         }
 
         self.minutes = self._build_minutes()
@@ -108,11 +109,51 @@ class PolishTimeNormalizer:
         minutes_alt = self._alternation(self.minutes)
         # literals with diacritics also need ASCII variants (diacritic-less ASR)
         wpol_pat = r"(?:wpół|wpol)"
-        polnoc_pat = r"(?:północ|polnoc)"
-        poludnie_pat = r"(?:południe|poludnie)"
+        # build midnight/noon forms via Morfeusz (all declensions) + ASCII
+        polnoc_forms, poludnie_forms = self._build_midnight_forms()
+        # fallback hardcoded if Morfeusz unavailable (should not happen in prod)
+        if not polnoc_forms:
+            polnoc_forms = {
+                "północ",
+                "północy",
+                "północą",
+                "północe",
+                "północom",
+                "północami",
+                "północach",
+            }
+        if not poludnie_forms:
+            poludnie_forms = {
+                "południe",
+                "południa",
+                "południowi",
+                "południu",
+                "południem",
+                "południach",
+                "południom",
+                "południami",
+            }
+        # expand ASCII for midnight sets (strip_diacritics)
+        polnoc_forms_expanded: set[str] = set()
+        for f in polnoc_forms:
+            polnoc_forms_expanded.add(f)
+            polnoc_forms_expanded.add(strip_diacritics(f))
+        poludnie_forms_expanded: set[str] = set()
+        for f in poludnie_forms:
+            poludnie_forms_expanded.add(f)
+            poludnie_forms_expanded.add(strip_diacritics(f))
+        # build alternations sorted by length desc
+        polnoc_alt = self._alternation_set(polnoc_forms_expanded)
+        poludnie_alt = self._alternation_set(poludnie_forms_expanded)
+        # keep for __call__ (geographic vs time)
+        self._polnoc_forms = polnoc_forms_expanded
+        self._poludnie_forms = poludnie_forms_expanded
+        self._polnoc_alt = polnoc_alt
+        self._poludnie_alt = poludnie_alt
 
-        self._polnoc_pat = polnoc_pat
-        self._poludnie_pat = poludnie_pat
+        # legacy single-form patterns kept for reference
+        self._polnoc_pat = r"(?:północ|polnoc)"
+        self._poludnie_pat = r"(?:południe|poludnie)"
 
         self._re_wpol = re.compile(r"\b" + wpol_pat + r"\s+do\s+(" + hours_gen_alt + r")\b")
         self._re_za = re.compile(r"\bza\s+(" + minutes_alt + r")\s+(" + hours_alt + r")\b")
@@ -125,7 +166,33 @@ class PolishTimeNormalizer:
         self._re_hour_gen_min = re.compile(r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b")
         # "o piątej" -> "o 5:00" (genitive hour, not followed by a word)
         self._re_o_hour = re.compile(r"\bo\s+(" + hours_gen_alt + r")\b(?!\s*[a-ząćęłńóśźż])")
-        # hour + time-of-day marker ("piąta rano" -> "5:00 rano")
+        # time-of-day markers (Morfeusz-inspired, covers rano + wieczorem/nocy/południu)
+        marker_phrases = [
+            "rano",
+            "wieczorem",
+            "w nocy",
+            "nocą",
+            "nad ranem",
+            "w dzień",
+        ]
+        marker_set: set[str] = set()
+        for phrase in marker_phrases:
+            phrase_lc = phrase.lower()
+            marker_set.add(phrase_lc)
+            stripped = strip_diacritics(phrase_lc)
+            if stripped != phrase_lc:
+                marker_set.add(stripped)
+        # also ensure ascii variants for phrases containing diacritics are added
+        # e.g. "w dzień" -> "w dzien"
+        marker_alt = self._alternation_set(marker_set)
+        self._marker_alt = marker_alt
+        # hour + marker ("piąta rano", "ósma wieczorem" -> "5:00 rano")
+        # also genitive hour + marker ("o piątej rano" is handled separately)
+        self._re_hour_marker = re.compile(r"\b(" + hours_alt + r")\s+(" + marker_alt + r")\b")
+        self._re_o_hour_marker = re.compile(
+            r"\bo\s+(" + hours_gen_alt + r")\s+(" + marker_alt + r")\b"
+        )
+        # keep legacy rano regexes for backwards compat (they are now subset of marker)
         self._re_hour_rano = re.compile(r"\b(" + hours_alt + r")\s+rano\b")
         self._re_o_hour_rano = re.compile(r"\bo\s+(" + hours_gen_alt + r")\s+rano\b")
         # variants with an explicit "minut(ę/y)" word – include ASCII "minutę" -> "minute"
@@ -139,11 +206,64 @@ class PolishTimeNormalizer:
         self._re_range = re.compile(
             r"\bod\s+(" + hours_gen_alt + r")\s+do\s+(" + hours_gen_alt + r")\b"
         )
+        # midnight/noon regexes: contextual (prep + declined) + standalone nominative
+        # only declined forms with appropriate preposition should become time; bare "północy" stays word (see test)
+        # include ASCII-folded variants for prepositions (około -> okolo, była -> byla, etc.)
+        time_prep = r"(o|przed|po|do|od|około|okolo|w|jest|była|byla|było|bylo|był|byl|były|byly)"
+        self._re_polnoc_context = re.compile(r"\b" + time_prep + r"\s+(?:" + polnoc_alt + r")\b")
+        self._re_poludnie_context = re.compile(
+            r"\b" + time_prep + r"\s+(?:" + poludnie_alt + r")\b"
+        )
+        self._re_polnoc_nominative = re.compile(r"\b(?:północ|polnoc)\b")
+        self._re_poludnie_nominative = re.compile(r"\b(?:południe|poludnie)\b")
+        # keep broad regex for any internal use but not in pipeline (avoid bare declined conversion)
+        self._re_polnoc = re.compile(r"\b(?:" + polnoc_alt + r")\b")
+        self._re_poludnie = re.compile(r"\b(?:" + poludnie_alt + r")\b")
+        # geographic protection: preposition + północ/południe (any declined form)
+        geo_preps = r"(?:na|z|od|do|w|ku|kierunek|strona|część|czesc|północno|polnocno|południowo|poludniowo|pod)"
+        self._re_geo_polnoc = re.compile(r"\b" + geo_preps + r"\s+(?:" + polnoc_alt + r")\b")
+        self._re_geo_poludnie = re.compile(r"\b" + geo_preps + r"\s+(?:" + poludnie_alt + r")\b")
+        # broader geographic: "na północy", "z północy", "od północy" etc already covered,
+        # but also "północny" adjectives should stay words – no conversion via midnight regex (word boundary)
 
         # cache for next instance (thread-safe)
         with PolishTimeNormalizer._CACHE_LOCK:
             if PolishTimeNormalizer._CACHE is None:
                 PolishTimeNormalizer._CACHE = dict(self.__dict__)
+
+    @staticmethod
+    def _build_midnight_forms() -> tuple[set[str], set[str]]:
+        """Collect midnight/noon declined forms via Morfeusz generate."""
+        try:
+            from .lemmatizer import PolishLemmatizer
+
+            lem = PolishLemmatizer()
+            polnoc: set[str] = set()
+            poludnie: set[str] = set()
+            if lem.morf is not None:
+                for base, target in (("północ", polnoc), ("południe", poludnie)):
+                    try:
+                        forms = lem.generate(base)
+                    except Exception:
+                        continue
+                    for surf, lemma, _tag in forms:
+                        if lemma.split(":")[0] != base:
+                            # allow "północ:..." but ignore abbreviations like "pn"
+                            if len(surf) <= 2:
+                                continue
+                            # still check base
+                            continue
+                        if len(surf) <= 2:  # skip abbrev "pn", "pd"
+                            continue
+                        pol = surf.lower()
+                        target.add(pol)
+                # ensure base forms present even if generate failed partially
+                polnoc.add("północ")
+                poludnie.add("południe")
+                return polnoc, poludnie
+        except Exception:
+            pass
+        return set(), set()
 
     @staticmethod
     def _ones_words() -> list[str]:
@@ -222,7 +342,26 @@ class PolishTimeNormalizer:
 
         return "|".join(_escape_phrase(k) for k in keys)
 
+    @staticmethod
+    def _alternation_set(values: set[str]) -> str:
+        keys = sorted(values, key=lambda w: (-len(w), -w.count(" ")))
+
+        def _escape_phrase(phrase: str) -> str:
+            return r"\s+".join(re.escape(part) for part in phrase.split())
+
+        return "|".join(_escape_phrase(k) for k in keys)
+
     def __call__(self, s: str) -> str:
+        s = self._re_wpol.sub(
+            lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
+        )
+        # handle time-of-day markers: generic marker before narrow "rano" to capture all
+        s = self._re_o_hour_marker.sub(self._o_hour_marker_repl, s)
+        s = self._re_hour_marker.sub(self._hour_marker_repl, s)
+        # legacy rano handlers (kept for compat, now redundant but harmless)
+        s = self._re_o_hour_rano.sub(self._o_hour_rano_repl, s)
+        s = self._re_hour_rano.sub(self._hour_rano_repl, s)
+
         # protect geographic "na północ/południe" (south/north) – keep as words
         # only convert time midnight/noon when not geographic
         _geo_map: dict[str, str] = {}
@@ -234,23 +373,24 @@ class PolishTimeNormalizer:
             _geo_map[key] = m.group(0)
             return key
 
-        # geographic prepositions + północ/południe should stay (include ASCII variants)
+        # geographic prepositions + północ/południe should stay (include ASCII variants and declensions via Morfeusz)
+        # need to protect both midnight forms
+        # we use two regexes but need to protect combined: first try polnoc then poludnie
+        s = self._re_geo_polnoc.sub(_protect_geo, s)
+        s = self._re_geo_poludnie.sub(_protect_geo, s)
+        # fallback legacy pattern (covers simple "na północ" if Morfeusz forms miss)
         s = re.sub(
             r"\b(na|z|od|do|w|ku|kierunek|strona|część|czesc|północno|polnocno|południowo|poludniowo)\s+(północ|polnoc|południe|poludnie)\b",
             _protect_geo,
             s,
         )
-        s = re.sub(r"\b(?:północ|polnoc)\b", "0:00", s)
-        s = re.sub(r"\b(?:południe|poludnie)\b", "12:00", s)
+        # convert midnight/noon: contextual prep+form and standalone nominative; bare declined like "północy" stays word
+        s = self._re_polnoc_context.sub(lambda m: f"{m.group(1)} 0:00", s)
+        s = self._re_poludnie_context.sub(lambda m: f"{m.group(1)} 12:00", s)
+        s = self._re_polnoc_nominative.sub("0:00", s)
+        s = self._re_poludnie_nominative.sub("12:00", s)
         for k, v in _geo_map.items():
             s = s.replace(k, v)
-
-        s = self._re_wpol.sub(
-            lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
-        )
-        # handle "o piątej rano" and "piąta rano" before generic "o piątej"
-        s = self._re_o_hour_rano.sub(self._o_hour_rano_repl, s)
-        s = self._re_hour_rano.sub(self._hour_rano_repl, s)
         s = self._re_za.sub(self._za_repl, s)
         s = self._re_po.sub(self._po_repl, s)
         s = self._re_godzina_min.sub(self._godzina_min_repl, s)
@@ -305,6 +445,16 @@ class PolishTimeNormalizer:
     def _hour_rano_repl(self, m: re.Match[str]) -> str:
         hour = self.hours[self._norm_phrase(m.group(1))]
         return f"{hour}:00 rano"
+
+    def _o_hour_marker_repl(self, m: re.Match[str]) -> str:
+        hour = self.hours_gen[self._norm_phrase(m.group(1))]
+        marker = self._norm_phrase(m.group(2))
+        return f"o {hour}:00 {marker}"
+
+    def _hour_marker_repl(self, m: re.Match[str]) -> str:
+        hour = self.hours[self._norm_phrase(m.group(1))]
+        marker = self._norm_phrase(m.group(2))
+        return f"{hour}:00 {marker}"
 
     def _range_repl(self, m: re.Match[str]) -> str:
         start = self.hours_gen[self._norm_phrase(m.group(1))]

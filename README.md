@@ -32,7 +32,7 @@
 | **Dates** | `5 maja` → `05.05` · `piątego maja` → `05.05` · `piątego maja 2026` → `05.05.2026` · `piątego maja roku dwa tysiące dwudziestego szóstego` → `05.05.2026` | `DD.MM` / `DD.MM.YYYY` zero-padded, conditional (`maja` alone stays `maja`, avoids `Maja`→`5`) |
 | **Geographic guard** | `na północ` stays, `jest północ` → `jest 0:00` | no false `0:00` for north |
 
-**Pipeline:** `lower → brackets/parens → time → decimal ,→. → remove_symbols(keep=".:/%$€£¢+-") → numbers → months (conditional) → dates → cleanup`. Configurable via `PolishTextNormalizer(date_format=...)`. Diacritic-less ASR (`czterdziesci`, `piec`) is handled automatically.
+**Pipeline** (`text.py`): `lower → brackets/parens/ignore → sentence period → time (Morfeusz) → decimal ,→. → remove_symbols(keep=".:/%$€£¢+-") → numbers (Morfeusz) → months (conditional, Morfeusz) → dates → cleanup`. Configurable via `PolishTextNormalizer(date_format=...)`. Diacritic-less ASR (`czterdziesci`, `piec`, `wpol`) handled via `utils` + `Morfeusz.generate`.
 
 ### Installation
 
@@ -163,11 +163,11 @@ Full API: **[neonfeline.github.io/polish-whisper-normalizer](https://neonfeline.
 
 ```bash
 uv sync --group dev
-uv run pytest -q          # 486 tests
+uv run pytest -q          # 600 tests
 uv run mypy src           # strict, py.typed
 uv run ruff check src tests && uv run ruff format --check src tests
 uv build
-mkdocs serve
+mkdocs serve              # strict
 ```
 
 - `py.typed` + `mypy --strict` (`warn_unused_ignores=false`)

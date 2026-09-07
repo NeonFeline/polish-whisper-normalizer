@@ -122,7 +122,7 @@ def test_ordinal_multiplier_extended(normalize, text, expected):
         ("jedna trzecia", "1/3"),
         ("trzy czwarte", "3/4"),
         ("dwie trzecie", "2/3"),
-        ("jedna druga", "1/2"),
+        ("jedna druga", "0.5"),  # 1/2 == 0.5 for WER (decimal)
         ("trzecia osoba", "3. osoba"),  # no false positive
         ("druga strona", "2. strona"),
     ],
@@ -198,5 +198,68 @@ def test_months_name_ambiguity_documents_issue(normalize):
     ],
 )
 def test_idempotency_extended(normalize, text):
+    once = normalize(text)
+    assert normalize(once) == once
+
+
+# --- decimal fractions: 21.5 == 21 i 5/10 (jednostki dataset) ---
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("dwadzieścia jeden i pięć dziesiątych", "21.5"),
+        ("21 i 5/10", "21.5"),
+        ("dwadzieścia jeden i pięćdziesiąt setnych", "21.5"),  # 50/100 -> 0.5
+        ("trzy i czternaście setnych", "3.14"),
+        ("sto dwadzieścia trzy i czterysta pięćdziesiąt sześć tysięcznych", "123.456"),
+        ("pięć dziesiątych", "0.5"),
+        ("jedna dziesiąta", "0.1"),
+        ("jedna druga", "0.5"),  # 1/2 == 0.5
+        ("dwie i pół", "2.5"),  # via i pół -> already 2.5
+        ("21.5", "21.5"),
+        ("21,5", "21.5"),
+    ],
+)
+def test_decimal_fractions_via_morfeusz(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+def test_decimal_fraction_wer_equivalence(normalize):
+    # 21.5 reference vs spoken decimal fractions should have WER 0
+    assert normalize("dwadzieścia jeden i pięć dziesiątych") == normalize("21.5")
+    assert normalize("21 i 5/10") == normalize("21.5")
+    assert normalize("21,5") == normalize("21.5")
+    # 0.5 vs 1/2
+    assert normalize("0.5") == normalize("1/2")
+    assert normalize("0.5") == normalize("jedna druga")
+    assert normalize("0.5") == normalize("pięć dziesiątych")
+    # via jiwer
+    try:
+        from polish_whisper_normalizer.jiwer import wer
+
+        assert wer("dwadzieścia jeden i pięć dziesiątych", "21.5") == 0.0
+        assert wer("21 i 5/10", "21.5") == 0.0
+        assert wer("0.5", "1/2") == 0.0
+        assert wer("0.5", "jedna druga") == 0.0
+    except ImportError:
+        pytest.skip("jiwer not installed")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "dwadzieścia jeden i pięć dziesiątych",
+        "21 i 5/10",
+        "21.5",
+        "pięć dziesiątych",
+        "0.5",
+        "1/2",
+        "jedna druga",
+        "trzy i czternaście setnych",
+        "123.456",
+    ],
+)
+def test_decimal_fraction_idempotency(normalize, text):
     once = normalize(text)
     assert normalize(once) == once

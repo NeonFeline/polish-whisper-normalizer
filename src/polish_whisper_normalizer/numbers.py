@@ -706,51 +706,50 @@ class PolishNumberNormalizer:
         # Normalize decimal fractions expressed as "21 i 5/10" (from
         # "dwadzieścia jeden i pięć dziesiątych") to decimal "21.5"
         # for equivalence with "21.5" reference (WER on jednostki).
-        # Only for decimal denominators (10,100,1000...) and numerator < denominator.
+        # Only decimal denominators (10,100,1000) and half (1/2) for 0.5==1/2.
+        def _is_decimal_den(den: int) -> bool:
+            s_den = str(den)
+            return s_den[0] == "1" and all(c == "0" for c in s_den[1:])
+
+        def _fraction_to_decimal_str(num: int, den: int, int_part: str | None = None) -> str | None:
+            if num >= den or num == 0:
+                return None
+            # decimal denominators (10,100,1000) or half 1/2
+            is_decimal = _is_decimal_den(den)
+            is_half = num == 1 and den == 2
+            if not (is_decimal or is_half):
+                return None
+            if is_half:
+                # 1/2 -> 0.5, 21 i 1/2 -> 21.5
+                return f"{int_part}.5" if int_part is not None else "0.5"
+            # power-of-10 decimal
+            k = len(str(den)) - 1
+            frac_str = f"{num:0{k}d}"
+            dec = f"{int_part}.{frac_str}" if int_part is not None else f"0.{frac_str}"
+            dec = dec.rstrip("0").rstrip(".")
+            if dec.endswith("."):
+                dec += "0"
+            if "." not in dec:
+                dec = f"{int_part if int_part is not None else '0'}.0"
+            return dec
+
         def _decimal_repl(m: re.Match[str]) -> str:
             int_part = m.group(1)
             num = int(m.group(2))
             den = int(m.group(3))
-            den_str = str(den)
-            # only power-of-10 denominators are decimal fractions
-            if den_str[0] != "1" or any(c != "0" for c in den_str[1:]):
+            dec = _fraction_to_decimal_str(num, den, int_part)
+            if dec is None:
                 return m.group(0)
-            if num >= den or num == 0:
-                return m.group(0)
-            k = len(den_str) - 1
-            frac_str = f"{num:0{k}d}"
-            dec = f"{int_part}.{frac_str}"
-            # strip trailing zeros for canonical decimal (50/100 -> 21.5 not 21.50)
-            # but keep leading zeros (5/100 -> 05 -> 21.05)
-            if "." in dec:
-                dec = dec.rstrip("0").rstrip(".")
-                if dec.endswith("."):
-                    dec += "0"
-                if "." not in dec:
-                    dec = f"{int_part}.0"
             return dec
 
         s = re.sub(r"\b(\d+)\s+i\s+(\d+)/(\d+)\b", _decimal_repl, s)
 
-        # Also normalize standalone decimal fractions "5/10" -> "0.5"
-        # so "pięć dziesiątych" vs "0.5" are equivalent.
         def _standalone_frac_repl(m: re.Match[str]) -> str:
             num = int(m.group(1))
             den = int(m.group(2))
-            den_str = str(den)
-            if den_str[0] != "1" or any(c != "0" for c in den_str[1:]):
+            dec = _fraction_to_decimal_str(num, den, None)
+            if dec is None:
                 return m.group(0)
-            if num >= den or num == 0:
-                return m.group(0)
-            k = len(den_str) - 1
-            frac_str = f"{num:0{k}d}"
-            dec = f"0.{frac_str}"
-            dec = dec.rstrip("0").rstrip(".")
-            if dec == "0":
-                dec = "0.0"
-            if "." not in dec:
-                dec = "0.0"
-            # keep minimal representation: 0.5 not 0.50, but 0.05 stays
             return dec
 
         s = re.sub(r"\b(\d+)/(\d+)\b", _standalone_frac_repl, s)

@@ -14,6 +14,17 @@ pattern = re.compile(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', re.MULTILINE)
 
 
 def bump() -> bool:
+    # Only bump when there's a staged commit (avoid bump on `pre-commit run --all-files`)
+    try:
+        # git diff --cached --quiet returns 0 if no staged changes
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"], check=False)
+        if result.returncode == 0:
+            # No staged changes -> not a real commit, skip bump
+            # Allow manual `python scripts/bump_patch.py` to still bump when passed --force
+            if "--force" not in sys.argv:
+                return False
+    except Exception:
+        pass
     text = PYPROJECT.read_text(encoding="utf-8")
     m = pattern.search(text)
     if not m:
@@ -25,7 +36,7 @@ def bump() -> bool:
     if new_text == text:
         return False
     PYPROJECT.write_text(new_text, encoding="utf-8")
-    print(f"bump_patch: {m.group(0).strip()} -> version = \"{new_version}\"")
+    print(f'bump_patch: {m.group(0).strip()} -> version = "{new_version}"')
     # re-stage file so commit includes the bump
     try:
         subprocess.run(["git", "add", str(PYPROJECT)], check=False)

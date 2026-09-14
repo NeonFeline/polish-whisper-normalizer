@@ -99,14 +99,17 @@ class PolishTimeNormalizer:
         }
 
         self.minutes = self._build_minutes()
+        self.minutes_ordinal = self._build_minutes_ordinal()
         # expand with ASCII variants for diacritic-less ASR
         self.hours = with_ascii_variants(self.hours)
         self.hours_gen = with_ascii_variants(self.hours_gen)
         self.minutes = with_ascii_variants(self.minutes)
+        self.minutes_ordinal = with_ascii_variants(self.minutes_ordinal)
 
         hours_alt = self._alternation(self.hours)
         hours_gen_alt = self._alternation(self.hours_gen)
         minutes_alt = self._alternation(self.minutes)
+        minutes_ordinal_alt = self._alternation(self.minutes_ordinal)
         # literals with diacritics also need ASCII variants (diacritic-less ASR)
         wpol_pat = r"(?:wpół|wpol)"
         # build midnight/noon forms via Morfeusz (all declensions) + ASCII
@@ -162,6 +165,16 @@ class PolishTimeNormalizer:
             r"\bgodzina\s+(" + hours_alt + r")\s+(" + minutes_alt + r")\b"
         )
         self._re_godzina = re.compile(r"\bgodzina\s+(" + hours_alt + r")\b")
+        self._re_o_godzinie_ord = re.compile(
+            r"\bo\s+godzinie\s+(" + hours_gen_alt + r")\s+(" + minutes_ordinal_alt + r")\b"
+        )
+        self._re_o_godzinie_hour = re.compile(
+            r"\bo\s+godzinie\s+(" + hours_gen_alt + r")\b(?!\s*(?:" + minutes_ordinal_alt + r")\b)"
+        )
+        self._re_godzina_digits = re.compile(r"\bgodzina\s+(\d{1,2})[.:,](\d{2})\b")
+        self._re_o_godzinie_digits = re.compile(r"\bo\s+godzinie\s+(\d{1,2})[.:,](\d{2})\b")
+        self._re_godzina_digit_hour = re.compile(r"\bgodzina\s+(\d{1,2})\b(?!\s*[:.,]\d)")
+        self._re_o_godzinie_digit_hour = re.compile(r"\bo\s+godzinie\s+(\d{1,2})\b(?!\s*[:.,]\d)")
         self._re_hour_min = re.compile(r"\b(" + hours_alt + r")\s+(" + minutes_alt + r")\b")
         self._re_hour_gen_min = re.compile(r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b")
         # "o piątej" -> "o 5:00" (genitive hour, not followed by a word)
@@ -329,6 +342,49 @@ class PolishTimeNormalizer:
         return minutes
 
     @staticmethod
+    def _build_minutes_ordinal() -> dict[str, int]:
+        """Genitive feminine ordinals used for minutes ("szesnastej piątej" -> 16:05)."""
+        units = [
+            "pierwszej",
+            "drugiej",
+            "trzeciej",
+            "czwartej",
+            "piątej",
+            "szóstej",
+            "siódmej",
+            "ósmej",
+            "dziewiątej",
+            "dziesiątej",
+            "jedenastej",
+            "dwunastej",
+            "trzynastej",
+            "czternastej",
+            "piętnastej",
+            "szesnastej",
+            "siedemnastej",
+            "osiemnastej",
+            "dziewiętnastej",
+        ]
+        tens = {
+            20: "dwudziestej",
+            30: "trzydziestej",
+            40: "czterdziestej",
+            50: "pięćdziesiątej",
+        }
+        result: dict[str, int] = {}
+        for m in range(1, 60):
+            if m <= 19:
+                result[units[m - 1]] = m
+            else:
+                t = m // 10 * 10
+                o = m % 10
+                if o == 0:
+                    result[tens[t]] = m
+                else:
+                    result[f"{tens[t]} {units[o - 1]}"] = m
+        return result
+
+    @staticmethod
     def _norm_phrase(s: str) -> str:
         return " ".join(s.split())
 
@@ -352,6 +408,12 @@ class PolishTimeNormalizer:
         return "|".join(_escape_phrase(k) for k in keys)
 
     def __call__(self, s: str) -> str:
+        s = self._re_godzina_digits.sub(self._godzina_digits_repl, s)
+        s = self._re_o_godzinie_digits.sub(self._o_godzinie_digits_repl, s)
+        s = self._re_godzina_digit_hour.sub(self._godzina_digit_hour_repl, s)
+        s = self._re_o_godzinie_digit_hour.sub(self._o_godzinie_digit_hour_repl, s)
+        s = self._re_o_godzinie_hour.sub(self._o_godzinie_hour_repl, s)
+        s = self._re_o_godzinie_ord.sub(self._o_godzinie_ord_repl, s)
         s = self._re_wpol.sub(
             lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
         )
@@ -460,3 +522,36 @@ class PolishTimeNormalizer:
         start = self.hours_gen[self._norm_phrase(m.group(1))]
         end = self.hours_gen[self._norm_phrase(m.group(2))]
         return f"od {start}:00 do {end}:00"
+
+    def _godzina_digits_repl(self, m: re.Match[str]) -> str:
+        hour, minute = int(m.group(1)), int(m.group(2))
+        if hour > 24 or minute > 59:
+            return m.group(0)
+        return f"{hour}:{minute:02d}"
+
+    def _o_godzinie_digits_repl(self, m: re.Match[str]) -> str:
+        hour, minute = int(m.group(1)), int(m.group(2))
+        if hour > 24 or minute > 59:
+            return m.group(0)
+        return f"o {hour}:{minute:02d}"
+
+    def _godzina_digit_hour_repl(self, m: re.Match[str]) -> str:
+        hour = int(m.group(1))
+        if hour > 24:
+            return m.group(0)
+        return f"{hour}:00"
+
+    def _o_godzinie_digit_hour_repl(self, m: re.Match[str]) -> str:
+        hour = int(m.group(1))
+        if hour > 24:
+            return m.group(0)
+        return f"o {hour}:00"
+
+    def _o_godzinie_ord_repl(self, m: re.Match[str]) -> str:
+        hour = self.hours_gen[self._norm_phrase(m.group(1))]
+        minute = self.minutes_ordinal[self._norm_phrase(m.group(2))]
+        return f"o {hour}:{minute:02d}"
+
+    def _o_godzinie_hour_repl(self, m: re.Match[str]) -> str:
+        hour = self.hours_gen[self._norm_phrase(m.group(1))]
+        return f"o {hour}:00"

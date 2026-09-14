@@ -80,6 +80,7 @@ class PolishNumberNormalizer:
             "szesnaście": 16,
             "siedemnaście": 17,
             "osiemnaście": 18,
+            "ośmnaście": 18,
             "dziewiętnaście": 19,
         }
         self.tens = {
@@ -554,22 +555,27 @@ class PolishNumberNormalizer:
                     value = tens
                 elif isinstance(value, str):
                     value = str(value) + str(tens)
+                elif value % 100 == 0:
+                    value += tens
                 else:
-                    if value % 100 == 0:
-                        value += tens
-                    else:
-                        value = str(value) + str(tens)
+                    # invalid magnitude order ("dziesięć dwadzieścia") -> separate numeral
+                    yield output(value)  # type: ignore[arg-type]
+                    value = tens
             elif current in self.hundreds:
                 hundred = self.hundreds[current]
                 if value is None:
                     value = hundred
                 elif isinstance(value, str):
                     value = str(value) + str(hundred)
+                elif value % 1000 == 0:
+                    value += hundred
+                elif value >= 100:
+                    # long digit-string reading ("trzysta czterdzieści osiemset ...")
+                    value = str(value) + str(hundred)
                 else:
-                    if value % 1000 == 0:
-                        value += hundred
-                    else:
-                        value = str(value) + str(hundred)
+                    # invalid magnitude order ("dziesięć pięćset") -> separate numeral
+                    yield output(value)  # type: ignore[arg-type]
+                    value = hundred
             elif current in self.multipliers:
                 multiplier = self.multipliers[current]
                 if value is None:
@@ -684,6 +690,9 @@ class PolishNumberNormalizer:
             yield output(value)
 
     def preprocess(self, s: str) -> str:
+        # ellipsis marks a sentence boundary: keep the boundary (so adjacent
+        # spelled-out numbers are not merged) but drop the "." later
+        s = re.sub(r"\s*(?:\.\s*){2,}|\s*…\s*", " . ", s)
         # "i pół" -> "przecinek pięć" (two and a half -> 2.5) – also ASCII "pol"
         s = re.sub(r"\bi\s+(?:pół|pol)\b", "przecinek pięć", s)
         s = re.sub(r"\b(?:półtora|poltora)\b", "jeden przecinek pięć", s)
@@ -976,6 +985,6 @@ class PolishNumberNormalizer:
         s = self.preprocess(s)
         words = self._convert_fractions(s.split())
         words = [self._canonicalize(w) for w in words]
-        s = " ".join(word for word in self.process_words(words) if word is not None)
+        s = " ".join(word for word in self.process_words(words) if word is not None and word != ".")
         s = self.postprocess(s)
         return s

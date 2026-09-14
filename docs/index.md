@@ -33,7 +33,7 @@ See [API](api.md) for details.
 
 ## Pipeline
 
-`lower → brackets/ignore → sentence period → time → decimal ,→. → remove_symbols → numbers → months (conditional) → dates → cleanup` (`PolishTextNormalizer` in `text.py`)
+`lower → brackets/ignore → r.→roku → sentence periods/ellipsis → time → decimal ,→. → numeral boundaries → remove_symbols → numbers → months (conditional) → dates → ordinal-dot cleanup` (`PolishTextNormalizer` in `text.py`)
 
 ## Architecture
 

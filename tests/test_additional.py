@@ -18,9 +18,9 @@ def normalize():
         ("o piątej rano", "o 5:00 rano"),
         ("piąta rano", "5:00 rano"),
         ("szósta rano", "6:00 rano"),
-        ("o drugiej stronie", "o 2. stronie"),  # no false positive
-        ("o piątej stronie", "o 5. stronie"),
-        ("piąta rocznica", "5. rocznica"),  # not time
+        ("o drugiej stronie", "o 2 stronie"),  # no false positive
+        ("o piątej stronie", "o 5 stronie"),
+        ("piąta rocznica", "5 rocznica"),  # not time
     ],
 )
 def test_standalone_o_time_extended(normalize, text, expected):
@@ -49,7 +49,7 @@ def test_time_minut_extended(normalize, text, expected):
     [
         ("od piątej do szóstej", "od 5:00 do 6:00"),
         ("od ósmej do dziesiątej", "od 8:00 do 10:00"),
-        ("od piątego do szóstego", "od 5. do 6."),  # ordinal, not time
+        ("od piątego do szóstego", "od 5 do 6"),  # ordinal, not time
     ],
 )
 def test_time_ranges_extended(normalize, text, expected):
@@ -105,11 +105,11 @@ def test_half_extended(normalize, text, expected):
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("tysiąc dziewięćsetny", "1900."),
-        ("tysiąc dziewięćsetny rok", "1900. rok"),
-        ("tysiąc dwusetny", "1200."),
-        ("dziewięćsetny", "900."),
-        ("tysiąc dziewięćset dziewięćdziesiąty dziewiąty", "1999."),
+        ("tysiąc dziewięćsetny", "1900"),
+        ("tysiąc dziewięćsetny rok", "1900 rok"),
+        ("tysiąc dwusetny", "1200"),
+        ("dziewięćsetny", "900"),
+        ("tysiąc dziewięćset dziewięćdziesiąty dziewiąty", "1999"),
     ],
 )
 def test_ordinal_multiplier_extended(normalize, text, expected):
@@ -123,8 +123,8 @@ def test_ordinal_multiplier_extended(normalize, text, expected):
         ("trzy czwarte", "3/4"),
         ("dwie trzecie", "2/3"),
         ("jedna druga", "0.5"),  # 1/2 == 0.5 for WER (decimal)
-        ("trzecia osoba", "3. osoba"),  # no false positive
-        ("druga strona", "2. strona"),
+        ("trzecia osoba", "3 osoba"),  # no false positive
+        ("druga strona", "2 strona"),
     ],
 )
 def test_fractions_extended(normalize, text, expected):
@@ -263,3 +263,132 @@ def test_decimal_fraction_wer_equivalence(normalize):
 def test_decimal_fraction_idempotency(normalize, text):
     once = normalize(text)
     assert normalize(once) == once
+
+
+# --- Mailabs: ellipsis boundaries, colloquial "ośmnaście", "r." year abbreviation ---
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Piętnaście...", "15"),
+        ("Piętnaście…", "15"),
+        ("piętnaście . . .", "15"),
+        ("Piętnaście... siedemnaście...", "15 17"),
+        ("Piętnaście... siedemnaście... ośmnaście... 1860...", "15 17 18 1860"),
+        ("ośmnaście", "18"),
+        ("ośmnaście...", "18"),
+        ("ośmnastu lat", "18 lat"),
+        ("w r. 1860", "w roku 1860"),
+        ("w r 1860", "w roku 1860"),
+    ],
+)
+def test_ellipsis_colloquial_osmascie_year_abbrev(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+def test_ellipsis_adds_no_spurious_dots(normalize):
+    assert normalize("Piętnaście... siedemnaście... ośmnaście... 1860...") == "15 17 18 1860"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Piętnaście...",
+        "ośmnaście...",
+        "w r. 1860...",
+        "Piętnaście... siedemnaście... ośmnaście... Było to w r. 1860...",
+    ],
+)
+def test_ellipsis_colloquial_year_abbrev_idempotency(normalize, text):
+    once = normalize(text)
+    assert normalize(once) == once
+
+
+# --- numeral separation: punctuation boundaries + invalid magnitude order ---
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("dziesięć, pięćset, dziewięćdziesiąt", "10 500 90"),
+        ("dziesięć. pięćset. dziewięćdziesiąt", "10 500 90"),
+        ("dwa, siedemset, siedem", "2 700 7"),
+        ("piętnaście, siedemnaście, osiemnaście", "15 17 18"),
+        # no separators: invalid magnitude order starts a new numeral
+        ("dziesięć pięćset dziewięćdziesiąt", "10 590"),
+        ("dwa siedemset siedem", "2 707"),
+        # valid composition must still work
+        ("dwa tysiące dwadzieścia trzy", "2023"),
+        ("sto dwadzieścia trzy", "123"),
+        ("siedemset siedem", "707"),
+        # long digit-string reading keeps concatenating (diacritic-less ASR contract)
+        ("trzysta czterdzieści osiemset osiem pięć siedem", "340800857"),
+    ],
+)
+def test_numeral_separation(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+# --- spoken/digit time consistency ("godzina", "o godzinie") ---
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Jest godzina dwudziesta piętnaście", "jest 20:15"),
+        ("Jest godzina 20.15", "jest 20:15"),
+        ("Jest godzina 20:15", "jest 20:15"),
+        ("Jest godzina 20,15", "jest 20:15"),
+        ("o godzinie 16.05", "o 16:05"),
+        ("o godzinie 16:05", "o 16:05"),
+        ("o godzinie szesnastej piątej", "o 16:05"),
+        ("o godzinie szesnastej", "o 16:00"),
+        ("o godzinie dwudziestej pierwszej", "o 21:00"),
+        ("o godzinie dwudziestej pierwszej piątej", "o 21:05"),
+        ("o godzinie czternastej trzydziestej piątej", "o 14:35"),
+    ],
+)
+def test_godzina_time_consistency(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Jest godzina 20.15",
+        "o godzinie szesnastej piątej",
+        "o godzinie dwudziestej pierwszej",
+        "o godzinie 16",
+        "dziesięć, pięćset, dziewięćdziesiąt",
+        "dwa siedemset siedem",
+        "trzysta czterdzieści osiemset osiem pięć siedem",
+    ],
+)
+def test_numeral_time_idempotency(normalize, text):
+    once = normalize(text)
+    assert normalize(once) == once
+
+
+# --- ordinal dot consistency: "piętnasty" and "15." both -> "15" ---
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("piętnasty", "15"),
+        ("15.", "15"),
+        ("dwudziesty pierwszy wiek", "21 wiek"),
+        ("21. wiek", "21 wiek"),
+        ("tysiąc dziewięćsetny rok", "1900 rok"),
+        ("minął 20. i z tego", "minął 20 i z tego"),
+    ],
+)
+def test_ordinal_dot_consistency(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+def test_ordinal_vs_cardinal_equivalent(normalize):
+    assert normalize("piętnasty") == normalize("15.")
+    assert normalize("piętnasty") == normalize("15")
+    assert normalize("dwudziesty pierwszy wiek") == normalize("21. wiek")

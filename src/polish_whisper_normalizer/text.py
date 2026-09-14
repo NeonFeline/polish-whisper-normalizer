@@ -19,7 +19,11 @@ class PolishTextNormalizer:
     _PAREN_RE = re.compile(r"\([^)]*\)")
     _WS_RE = re.compile(r"\s+")
     _IGNORE_RE = re.compile(r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b")
-    _SENTENCE_PERIOD_RE = re.compile(r"(?<!\d)\.([^0-9]|$)")
+    _SENTENCE_PERIOD_RE = re.compile(r"(?<![\d.])\.(?!\.)([^0-9]|$)")
+    _ELLIPSIS_RE = re.compile(r"\s*(?:\.\s*){2,}|\s*…\s*")
+    _NUMBER_SEPARATOR_RE = re.compile(r"[,;!?—–]")
+    _TRAILING_DIGIT_PERIOD_RE = re.compile(r"(?<=\d)\.(?=\s|$)")
+    _R_ABBREV_RE = re.compile(r"\br\.?\s*(?=\d{3,4}\b)")
     _DECIMAL_COMMA_RE = re.compile(r"(\d),(\d)")
     _MONTH_DAY_RE = re.compile(r"(\d+)\.?\s+([a-ząćęłńóśźż]+)\b")
     _FULL_DATE_ROKU_BEFORE_RE = re.compile(r"(\d+)\.\s+(\d+)\s+(?:roku|r\.?)\s+(\d+)\.?")
@@ -96,13 +100,22 @@ class PolishTextNormalizer:
         s = self._PAREN_RE.sub("", s)  # remove words between parenthesis
         s = self._IGNORE_RE.sub("", s)
 
+        # expand the year abbreviation "r." / "r" to "roku" (w r. 1860 -> w roku 1860)
+        s = self._R_ABBREV_RE.sub("roku ", s)
+
         # remove sentence periods before digits are introduced by time/number
-        # normalization; keep decimals ("3.14") and ordinal markers ("21.")
-        s = self._SENTENCE_PERIOD_RE.sub(r" \1", s)
+        # normalization; keep decimals ("3.14"), ordinal markers ("21.") and
+        # ellipses (handled as boundaries below). A boundary "." is emitted so
+        # separate numerals ("10. 500") are not merged, then dropped by numbers.
+        s = self._SENTENCE_PERIOD_RE.sub(r" . \1", s)
+        s = self._ELLIPSIS_RE.sub(" . ", s)
 
         s = self.standardize_time(s)
 
         s = self._DECIMAL_COMMA_RE.sub(r"\1.\2", s)  # Polish decimal comma -> point
+        # other punctuation separates numerals ("10, 500" -> "10 500") instead
+        # of being erased (which would merge them into "10500")
+        s = self._NUMBER_SEPARATOR_RE.sub(" . ", s)
         s = remove_symbols(
             s, keep=".:/%$€£¢+-"
         )  # keep numeric/time/sign/currency symbols + fraction slash
@@ -160,6 +173,10 @@ class PolishTextNormalizer:
         # day month without year -> 5. 5 -> 05.05 (as requested)
         # only when month is not ordinal (no trailing dot) – avoids "1. 2." -> "01.02."
         s = self._DAY_MONTH_RE.sub(_day_month, s)
+
+        # ordinal dots are dropped at the end of the pipeline; strip the same
+        # dot from already-digit input ("15." -> "15") for consistency
+        s = self._TRAILING_DIGIT_PERIOD_RE.sub("", s)
 
         # remove leftover symbols that are not part of a number/time
         s = self._PERCENT_RE.sub(r"\1 ", s)

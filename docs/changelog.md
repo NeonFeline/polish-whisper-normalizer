@@ -29,3 +29,7 @@
 - Split monolithic `polish.py` (1172 lines) into `lemmatizer.py`, `utils.py`, `numbers.py`, `time.py`, `text.py` with `polish.py` shim for compat
 - Fix diacritic-less ASR: `trzysta czterdziesci osiem` → `348` (was `300 czterdziesci 808 piec 7`) – expand lexicons with `utils.with_ascii_variants` and build declined ASCII map via `Morfeusz.generate`
 - Handle `wpol`/`polnoc`/`poludnie`/`pol`/`poltora` and fractions/months via same map; `time`/`text` now delegate fully to `PolishLemmatizer`
+- Ellipsis (`...`, `…`) no longer leaks stray `.` tokens; punctuation separates numerals (`10, 500, 90` → `10 500 90`) while valid composition (`dwa tysiące dwadzieścia trzy` → `2023`) is kept
+- Expand year abbreviation `r.`/`r` → `roku` (`w r. 1860` → `w roku 1860`); accept colloquial `ośmnaście` → `18`
+- Drop trailing ordinal dots in `PolishTextNormalizer` output so `piętnasty` ≡ `15.` ≡ `15` for WER
+- Time: already-digit `godzina 20.15` → `20:15`, `o godzinie 16.05` → `o 16:05`, `o godzinie szesnastej piątej` → `o 16:05`

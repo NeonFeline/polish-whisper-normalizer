@@ -43,3 +43,11 @@ def test_polish_transform_compose():
 
 def test_custom_date_format():
     assert wer("piątego maja 2026", "2026-05-05", date_format="%Y-%m-%d") == 0.0
+
+
+def test_polish_wer_mailabs_ellipsis_typo_year_abbrev():
+    # ref uses ellipses + "ośmnaście" typo + "r." abbreviation, model digits.
+    # Ellipses must not leak spurious "." tokens and all three forms must match.
+    ref = "Zaczekaj pan... Piętnaście... siedemnaście... ośmnaście... Było to w r. 1860..."
+    hyp = "Zaczekaj pan 15, 17, 18. Było to w roku 1860."
+    assert wer(ref, hyp) == 0.0

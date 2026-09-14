@@ -21,7 +21,7 @@ def normalize():
         # PELCRA Diabiz – date with month + time context
         (
             "Wie pani co Chwileczkę Nie faktura jest piętnastego maja termin płatności minął dwudziestego I z tego względu plan spłaty został zerwany",
-            "wie pani co chwileczkę nie faktura jest 15.05 termin płatności minął 20. i z tego względu plan spłaty został zerwany",
+            "wie pani co chwileczkę nie faktura jest 15.05 termin płatności minął 20 i z tego względu plan spłaty został zerwany",
         ),
         # PELCRA – currency + half
         (
@@ -83,3 +83,17 @@ def test_month_conditional_on_dataset(normalize):
 def test_fraction_idempotent_dataset(normalize):
     assert normalize("jedna trzecia") == "1/3"
     assert normalize("1/3") == "1/3"
+
+
+# Mailabs 0001-00036 – ellipsis after numbers, colloquial "ośmnaście", "r." year abbrev.
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (
+            "Zaczekaj pan... Piętnaście... siedemnaście... ośmnaście... Było to w r. 1860...",
+            "zaczekaj pan 15 17 18 było to w roku 1860",
+        ),
+    ],
+)
+def test_mailabs_ellipsis_colloquial_osmascie_year_abbrev(normalize, text, expected):
+    assert normalize(text) == expected

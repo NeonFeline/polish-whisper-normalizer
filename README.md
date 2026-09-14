@@ -21,18 +21,19 @@
 | Area | Example | Normalized |
 |---|---|---|
 | **Diacritics** | `Żółć!` | `żółć` (kept) / `zolc` with `remove_diacritics=True` |
-| **Cardinal / ordinal** | `sto dwadzieścia trzy`, `dwudziestu pięciu`, `pierwszego → 1.` | `123`, `25`, `1.` |
+| **Cardinal / ordinal** | `sto dwadzieścia trzy`, `dwudziestu pięciu`, `pierwszego → 1` | `123`, `25`, `1` (ordinal dots dropped) |
+| **Numeral separation** | `10, 500, 90` vs `dwa tysiące dwadzieścia trzy` | `10 500 90` vs `2023` (punctuation/composition aware) |
 | **Time** | `piąta trzydzieści`, `wpół do ósmej`, `o piątej`, `piąta rano`, `od piątej do szóstej` | `5:30`, `7:30`, `o 5:00`, `5:00 rano`, `od 5:00 do 6:00` |
 | **Time with `minut`** | `dziesięć minut po piątej`, `za dwadzieścia minut ósma` | `5:10`, `7:40` |
 | **Fractions** | `jedna trzecia`, `trzy czwarte` | `1/3`, `3/4` (keeps `/`, idempotent) |
 | **Half** | `pół litra`, `półtora`, `dwa i pół` | `0.5 litra`, `1.5`, `2.5` |
 | **Currency** | `pięć złotych`, `€10`, `pięć złotówek` | `5 zł`, `10 €`, `5 zł` |
 | **Percent** | `pięć procentów` | `5%` |
-| **Ordinal multipliers** | `tysiąc dziewięćsetny` | `1900.` |
+| **Ordinal multipliers** | `tysiąc dziewięćsetny` | `1900` |
 | **Dates** | `5 maja` → `05.05` · `piątego maja` → `05.05` · `piątego maja 2026` → `05.05.2026` · `piątego maja roku dwa tysiące dwudziestego szóstego` → `05.05.2026` | `DD.MM` / `DD.MM.YYYY` zero-padded, conditional (`maja` alone stays `maja`, avoids `Maja`→`5`) |
 | **Geographic guard** | `na północ` stays, `jest północ` → `jest 0:00` | no false `0:00` for north |
 
-**Pipeline** (`text.py`): `lower → brackets/parens/ignore → sentence period → time (Morfeusz) → decimal ,→. → remove_symbols(keep=".:/%$€£¢+-") → numbers (Morfeusz) → months (conditional, Morfeusz) → dates → cleanup`. Configurable via `PolishTextNormalizer(date_format=...)`. Diacritic-less ASR (`czterdziesci`, `piec`, `wpol`) handled via `utils` + `Morfeusz.generate`.
+**Pipeline** (`text.py`): `lower → brackets/parens/ignore → r.→roku → sentence periods/ellipsis → time (Morfeusz) → decimal ,→. → numeral boundaries → remove_symbols(keep=".:/%$€£¢+-") → numbers (Morfeusz) → months (conditional, Morfeusz) → dates → ordinal-dot cleanup`. Configurable via `PolishTextNormalizer(date_format=...)`. Diacritic-less ASR (`czterdziesci`, `piec`, `wpol`) handled via `utils` + `Morfeusz.generate`.
 
 ### Installation
 

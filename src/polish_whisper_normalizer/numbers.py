@@ -530,6 +530,22 @@ class PolishNumberNormalizer:
             elif current in self.zeros:
                 value = str(value or "") + "0"
             elif current in self.ones:
+                # Pronominal "jeden" (not numeral): "wszystko mi było jedno",
+                # "chciałem tylko jednego" (canonicalized to "jeden") stays a
+                # word (bug 7, like "Maja"/"na północ" guards).
+                if current in {"jeden", "jedna", "jedno"} and prev in {
+                    "było",
+                    "bylo",
+                    "była",
+                    "byla",
+                    "jest",
+                    "tylko",
+                    "mi",
+                }:
+                    if value is not None:
+                        yield output(value)  # type: ignore[arg-type]
+                    yield output(current)  # type: ignore[arg-type]
+                    continue
                 ones = self.ones[current]
                 if value is None:
                     value = ones
@@ -537,24 +553,55 @@ class PolishNumberNormalizer:
                     if prev in self.tens and ones < 10:
                         assert value[-1] == "0"  # type: ignore[index]
                         value = value[:-1] + str(ones)  # type: ignore[index, union-attr]
-                    else:
+                    elif isinstance(value, str) and "." in value:
+                        # decimal fraction after "przecinek/kropka"
+                        # ("3."+"14" -> "3.14", "0."+"5" -> "0.5",
+                        # "3.1"+"4" -> "3.14"): always glue
                         value = str(value) + str(ones)
+                    elif ones < 10:
+                        # digit dictation ("jeden dwa trzy" -> "123") only for
+                        # single digits with small values; larger chunks start
+                        # new numerals (bug 5: "701"+"12" -> "701 12").
+                        try:
+                            iv = int(value)  # type: ignore[arg-type]
+                        except (ValueError, TypeError):
+                            iv = None
+                        if iv is not None and iv < 100:
+                            value = str(value) + str(ones)
+                        else:
+                            yield output(value)  # type: ignore[arg-type]
+                            value = ones
+                    else:
+                        # teens (10-19) never glue as dictation; separate
+                        yield output(value)  # type: ignore[arg-type]
+                        value = ones
                 elif ones < 10:
                     if value % 10 == 0:
                         value += ones
-                    else:
+                    elif value < 100:  # type: ignore[operator]
                         value = str(value) + str(ones)
+                    else:
+                        yield output(value)  # type: ignore[arg-type]
+                        value = ones
                 else:  # eleven to nineteen
                     if value % 100 == 0:
                         value += ones
                     else:
-                        value = str(value) + str(ones)
+                        yield output(value)  # type: ignore[arg-type]
+                        value = ones
             elif current in self.tens:
                 tens = self.tens[current]
                 if value is None:
                     value = tens
                 elif isinstance(value, str):
-                    value = str(value) + str(tens)
+                    if "." in value:
+                        # decimal ("0."+"20" -> "0.20"): glue
+                        value = str(value) + str(tens)
+                    else:
+                        # dictation string + tens starts a new numeral
+                        # (bug 5: avoid "12"+"40" -> "1240")
+                        yield output(value)  # type: ignore[arg-type]
+                        value = tens
                 elif value % 100 == 0:
                     value += tens
                 else:
@@ -566,12 +613,19 @@ class PolishNumberNormalizer:
                 if value is None:
                     value = hundred
                 elif isinstance(value, str):
-                    value = str(value) + str(hundred)
+                    if "." in value:
+                        value = str(value) + str(hundred)
+                    else:
+                        # dictation string + hundreds starts a new numeral
+                        yield output(value)  # type: ignore[arg-type]
+                        value = hundred
                 elif value % 1000 == 0:
                     value += hundred
                 elif value >= 100:
-                    # long digit-string reading ("trzysta czterdzieści osiemset ...")
-                    value = str(value) + str(hundred)
+                    # invalid order with large value ("340"+"800") -> separate
+                    # (bug 5: avoid 21-digit tokens; "340 800" not "340800")
+                    yield output(value)  # type: ignore[arg-type]
+                    value = hundred
                 else:
                     # invalid magnitude order ("dziesięć pięćset") -> separate numeral
                     yield output(value)  # type: ignore[arg-type]
@@ -701,8 +755,16 @@ class PolishNumberNormalizer:
         s = re.sub(r"\b(?:pół|pol)\b", "zero przecinek pięć", s)
 
         # normalize currency symbols to follow the amount ("€10" -> "10 €",
-        # "10€" -> "10 €", "$1.50" -> "1.50 $")
-        s = re.sub(r"([€$£¢])\s*(\d+(?:\.\d+)?)", r"\2 \1", s)
+        # "10€" -> "10 €", "$1.50" -> "1.50 $").
+        # Only when the symbol is a true prefix (not already a suffix of a
+        # previous amount): "5 $ 18 ¢" must NOT become "5 18 $ ¢" (bug 3).
+        def _currency_prefix_repl(m: re.Match[str]) -> str:
+            prev = m.string[: m.start()].rstrip()[-1:] if m.string[: m.start()].rstrip() else ""
+            if prev.isdigit():
+                return m.group(0)
+            return f"{m.group(2)} {m.group(1)}"
+
+        s = re.sub(r"([€$£¢])\s*(\d+(?:\.\d+)?)", _currency_prefix_repl, s)
         s = re.sub(r"(\d+(?:\.\d+)?)\s*([€$£¢])", r"\1 \2", s)
 
         # put a space at number/letter boundary
@@ -762,10 +824,32 @@ class PolishNumberNormalizer:
             return dec
 
         s = re.sub(r"\b(\d+)/(\d+)\b", _standalone_frac_repl, s)
+        # Strip leading zeros for idempotency ("007" -> "7", "005" -> "5"):
+        # word-form "zero zero siedem" glues to "007" on pass 1 but digit
+        # "007" goes via Fraction to 7, so N(N(x)) != N(x) (bug 6a).
+        # Preserve dates (05.05, 05.05.2026, 2026-05-05, 5/5/2026) and times
+        # (0:00, 12:00): no stripping adjacent to ".", ":", "-", "/".
+        s = re.sub(r"(?<![\d.:/-])([+-]?)0+(\d)(?![\d.:/-])", r"\1\2", s)
+        # Collapse "00" alone -> "0" (e.g. "00" from "zero zero").
+        s = re.sub(r"(?<![\d.:/-])([+-]?)0{2,}(?![\d.:/-])", r"\g<1>0", s)
+        # Normalize time hours ("00:00" -> "0:00", "07:05" -> "7:05")
+        # to converge with word-form times ("0:00", "7:05"); minutes stay padded.
+        s = re.sub(r"\b0+(\d+:\d{2})\b", r"\1", s)
         return s
 
     def _fraction_denominator(self, word: str) -> int | None:
         """Return the ordinal value of `word` if it is a fraction denominator."""
+        # Cardinals are never denominators: "czterdzieści" (40, cardinal) must
+        # not become denominator 40 via its adj analysis "czterdziesty"
+        # (bug 4: "dwadzieścia trzy czterdzieści pięć" -> "23/40 5").
+        if (
+            word in self.ones
+            or word in self.tens
+            or word in self.hundreds
+            or word in self.zeros
+            or word in self.fraction_numerators
+        ):
+            return None
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "adj" and base in self.ordinal_values:
                 value = self.ordinal_values[base]

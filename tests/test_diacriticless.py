@@ -75,11 +75,11 @@ def test_numbers_diacritic_vs_stripped(number_norm, text, expected):
 
 
 def test_long_mixed_number_stripped(number_norm):
-    # original bug report: long number that was 300 ... piec 7
-    assert number_norm("trzysta czterdzieści osiemset osiem pięć siedem") == "340800857"
+    # long digit-strings stay split (bug 5: "340 808 57" not "340800857")
+    assert number_norm("trzysta czterdzieści osiemset osiem pięć siedem") == "340 808 57"
     stripped = remove_symbols_and_diacritics("trzysta czterdzieści osiemset osiem pięć siedem")
     assert stripped == "trzysta czterdziesci osiemset osiem piec siedem"
-    assert number_norm(stripped) == "340800857"
+    assert number_norm(stripped) == "340 808 57"
 
 
 # ---------------------------------------------------------------------------

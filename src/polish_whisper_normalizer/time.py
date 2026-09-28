@@ -171,10 +171,19 @@ class PolishTimeNormalizer:
         self._re_o_godzinie_hour = re.compile(
             r"\bo\s+godzinie\s+(" + hours_gen_alt + r")\b(?!\s*(?:" + minutes_ordinal_alt + r")\b)"
         )
-        self._re_godzina_digits = re.compile(r"\bgodzina\s+(\d{1,2})[.:,](\d{2})\b")
-        self._re_o_godzinie_digits = re.compile(r"\bo\s+godzinie\s+(\d{1,2})[.:,](\d{2})\b")
-        self._re_godzina_digit_hour = re.compile(r"\bgodzina\s+(\d{1,2})\b(?!\s*[:.,]\d)")
-        self._re_o_godzinie_digit_hour = re.compile(r"\bo\s+godzinie\s+(\d{1,2})\b(?!\s*[:.,]\d)")
+        # "godzina" + declined forms (godziny/godzinie/godzinę/…) + digits.
+        # Whisper usually omits "godzina" but corpus hits like
+        # "do godziny 18.00" need the genitive trigger (bug 2).
+        self._re_godzina_digits = re.compile(r"\bgodzin\w*\s+(\d{1,2})[.:,](\d{2})\b")
+        self._re_o_godzinie_digits = re.compile(r"\bo\s+godzin\w*\s+(\d{1,2})[.:,](\d{2})\b")
+        self._re_godzina_digit_hour = re.compile(r"\bgodzin\w*\s+(\d{1,2})\b(?!\s*[:.,]\d)")
+        self._re_o_godzinie_digit_hour = re.compile(r"\bo\s+godzin\w*\s+(\d{1,2})\b(?!\s*[:.,]\d)")
+        # Bare digit dot-times: "18.30" -> "18:30" (Whisper omits "godzina").
+        # Dot only (comma is Polish decimal, colon already time). Excludes dates
+        # (DD.MM with MM 01-12) and currency/percent contexts; requires round
+        # minutes (M%5==0) or PM hour (H>=13) to preserve decimals like 3.14.
+        # The (?!\.\d) lookahead keeps DD.MM.YYYY dates intact.
+        self._re_bare_dot_time = re.compile(r"\b(\d{1,2})\.(\d{2})\b(?!\.\d)")
         self._re_hour_min = re.compile(r"\b(" + hours_alt + r")\s+(" + minutes_alt + r")\b")
         self._re_hour_gen_min = re.compile(r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b")
         # "o piątej" -> "o 5:00" (genitive hour, not followed by a word)
@@ -412,6 +421,7 @@ class PolishTimeNormalizer:
         s = self._re_o_godzinie_digits.sub(self._o_godzinie_digits_repl, s)
         s = self._re_godzina_digit_hour.sub(self._godzina_digit_hour_repl, s)
         s = self._re_o_godzinie_digit_hour.sub(self._o_godzinie_digit_hour_repl, s)
+        s = self._re_bare_dot_time.sub(self._bare_dot_time_repl, s)
         s = self._re_o_godzinie_hour.sub(self._o_godzinie_hour_repl, s)
         s = self._re_o_godzinie_ord.sub(self._o_godzinie_ord_repl, s)
         s = self._re_wpol.sub(
@@ -522,6 +532,51 @@ class PolishTimeNormalizer:
         start = self.hours_gen[self._norm_phrase(m.group(1))]
         end = self.hours_gen[self._norm_phrase(m.group(2))]
         return f"od {start}:00 do {end}:00"
+
+    def _bare_dot_time_repl(self, m: re.Match[str]) -> str:
+        hour, minute = int(m.group(1)), int(m.group(2))
+        if hour > 24 or minute > 59:
+            return m.group(0)
+        # Preserve day.month dates: DD.MM with MM 01-12 stays dotted
+        # (e.g. 21.05 May 21, 05.05, 01.01). Times like 18.30 (MM 30)
+        # cannot be dates and convert to 18:30.
+        if 1 <= hour <= 31 and 1 <= minute <= 12:
+            return m.group(0)
+        # Preserve decimals like 3.14: require round minutes (M%5==0)
+        # or PM hour (H>=13). 18.30/8.15/20.45/18.00 convert, 3.14 stays.
+        if minute % 5 != 0 and hour < 13:
+            return m.group(0)
+        # Preserve currency/percent amounts ("1.50 $", "$1.50", "20.15%"):
+        # check surrounding text for currency symbols/words or %.
+        full = m.string
+        start, end = m.start(), m.end()
+        after = full[end : end + 12].lower()
+        before = full[max(0, start - 12) : start].lower()
+        after_stripped = after.lstrip()
+        # after: "$", "€", "£", "¢", "%", "zł", "gr", "euro", "dolar", …
+        if after_stripped[:1] in {"$", "€", "£", "¢", "%"}:
+            return m.group(0)
+        for cur in (
+            "zł",
+            "gr",
+            "euro",
+            "eur",
+            "dolar",
+            "usd",
+            "cent",
+            "funt",
+            "gbp",
+            "procent",
+            "pln",
+            "złoty",
+            "grosz",
+        ):
+            if after_stripped.startswith(cur):
+                return m.group(0)
+        before_stripped = before.rstrip()
+        if before_stripped[-1:] in {"$", "€", "£", "¢"}:
+            return m.group(0)
+        return f"{hour}:{minute:02d}"
 
     def _godzina_digits_repl(self, m: re.Match[str]) -> str:
         hour, minute = int(m.group(1)), int(m.group(2))

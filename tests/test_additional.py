@@ -322,8 +322,9 @@ def test_ellipsis_colloquial_year_abbrev_idempotency(normalize, text):
         ("dwa tysiące dwadzieścia trzy", "2023"),
         ("sto dwadzieścia trzy", "123"),
         ("siedemset siedem", "707"),
-        # long digit-string reading keeps concatenating (diacritic-less ASR contract)
-        ("trzysta czterdzieści osiemset osiem pięć siedem", "340800857"),
+        # long digit-strings stay split (bug 5: avoid 9/21-digit tokens;
+        # "340 808 57" not "340800857" so one ASR error != whole-token error)
+        ("trzysta czterdzieści osiemset osiem pięć siedem", "340 808 57"),
     ],
 )
 def test_numeral_separation(normalize, text, expected):

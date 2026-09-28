@@ -36,6 +36,32 @@ class PolishTextNormalizer:
     _COLON_RE = re.compile(r"(?<!\d):|:(?!\d)")
     _SIGN_RE = re.compile(r"[-+](?!\d)")
     _WANTS_R_RE = re.compile(r"\br\.?\b")
+    # Polish abbreviations <-> spoken forms (bug 8): contract full forms to
+    # short (gender/case-neutral: "tak zwany/tak zwana" -> "tzw") except
+    # "godz." which expands to "godzina" to enable time conversion.
+    _ABBREV_TZW_RE = re.compile(r"\btak\s+zwan\w*\b")
+    _ABBREV_NP_RE = re.compile(r"\bna\s+przyk[lł]ad\b")
+    _ABBREV_ITD_RE = re.compile(r"\bi\s+tak\s+dalej\b")
+    _ABBREV_ITP_RE = re.compile(r"\bi\s+(?:temu|tym)\s+podobn\w*\b")
+    _ABBREV_MIN_SHORT_RE = re.compile(r"\bm\s*\.\s*in\s*\.?(?=\s|$)")
+    # "tj."/"tzn." (i.e.) expand to full; "to jest"/"to znaczy" (it is)
+    # stay full (don't contract copula "to jest złoty" -> must stay).
+    _ABBREV_TJ_SHORT_RE = re.compile(r"\btj\s*\.?(?=\s|$)")
+    _ABBREV_TZN_SHORT_RE = re.compile(r"\btzn\s*\.?(?=\s|$)")
+    _ABBREV_TZW_SHORT_RE = re.compile(r"\btzw\s*\.?(?=\s|$)")
+    _ABBREV_NP_SHORT_RE = re.compile(r"\bnp\s*\.?(?=\s|$)")
+    _ABBREV_ITD_SHORT_RE = re.compile(r"\bitd\s*\.?(?=\s|$)")
+    _ABBREV_ITP_SHORT_RE = re.compile(r"\bitp\s*\.?(?=\s|$)")
+    _ABBREV_GODZ_RE = re.compile(r"\bgodz\.(?=\s|$)|\bgodz\b")
+    _ABBREV_UL_FULL_RE = re.compile(r"\bulic\w*\b")
+    _ABBREV_UL_SHORT_RE = re.compile(r"\bul\s*\.?(?=\s|$)")
+    _ABBREV_NR_FULL_RE = re.compile(r"\bnumer\w*\b")
+    _ABBREV_NR_SHORT_RE = re.compile(r"\bnr\s*\.?(?=\s|$)")
+    _ABBREV_DR_FULL_RE = re.compile(r"\bdoktor\w*\b")
+    _ABBREV_DR_SHORT_RE = re.compile(r"\bdr\s*\.?(?=\s|$)")
+    _ABBREV_PROF_FULL_RE = re.compile(r"\bprofesor\w*\b")
+    _ABBREV_PROF_SHORT_RE = re.compile(r"\bprof\s*\.?(?=\s|$)")
+    _ABBREV_OK_RE = re.compile(r"\bok\.(?=\s|$)")
 
     def __init__(self, date_format: str = "{day:02d}.{month:02d}.{year}", **kwargs: object) -> None:
         """
@@ -96,6 +122,31 @@ class PolishTextNormalizer:
     def __call__(self, s: str) -> str:
         s = s.lower()
 
+        # Polish abbreviations <-> spoken forms (bug 8): normalize both sides
+        # to the same token ("tak zwany" <-> "tzw" -> "tzw", "np." -> "np",
+        # "tj." -> "to jest" to preserve copula "to jest złoty").
+        s = self._ABBREV_TZW_RE.sub("tzw", s)
+        s = self._ABBREV_NP_RE.sub("np", s)
+        s = self._ABBREV_ITD_RE.sub("itd", s)
+        s = self._ABBREV_ITP_RE.sub("itp", s)
+        s = self._ABBREV_MIN_SHORT_RE.sub("między innymi", s)
+        s = self._ABBREV_TJ_SHORT_RE.sub("to jest", s)
+        s = self._ABBREV_TZN_SHORT_RE.sub("to znaczy", s)
+        s = self._ABBREV_TZW_SHORT_RE.sub("tzw", s)
+        s = self._ABBREV_NP_SHORT_RE.sub("np", s)
+        s = self._ABBREV_ITD_SHORT_RE.sub("itd", s)
+        s = self._ABBREV_ITP_SHORT_RE.sub("itp", s)
+        s = self._ABBREV_GODZ_RE.sub("godzina", s)
+        s = self._ABBREV_UL_FULL_RE.sub("ul", s)
+        s = self._ABBREV_UL_SHORT_RE.sub("ul", s)
+        s = self._ABBREV_NR_FULL_RE.sub("nr", s)
+        s = self._ABBREV_NR_SHORT_RE.sub("nr", s)
+        s = self._ABBREV_DR_FULL_RE.sub("dr", s)
+        s = self._ABBREV_DR_SHORT_RE.sub("dr", s)
+        s = self._ABBREV_PROF_FULL_RE.sub("prof", s)
+        s = self._ABBREV_PROF_SHORT_RE.sub("prof", s)
+        s = self._ABBREV_OK_RE.sub("około", s)
+
         s = self._BRACKETS_RE.sub("", s)  # remove words between brackets
         s = self._PAREN_RE.sub("", s)  # remove words between parenthesis
         s = self._IGNORE_RE.sub("", s)
@@ -119,6 +170,10 @@ class PolishTextNormalizer:
         s = remove_symbols(
             s, keep=".:/%$€£¢+-"
         )  # keep numeric/time/sign/currency symbols + fraction slash
+        # Strip non-time colons before number conversion so "drugi:" -> "drugi"
+        # converts to "2" (bug 6b: punctuation suppressed ordinal conversion).
+        # _COLON_RE preserves digit:digit times ("18:30").
+        s = self._COLON_RE.sub(" ", s)
 
         s = self.standardize_numbers(s)
 

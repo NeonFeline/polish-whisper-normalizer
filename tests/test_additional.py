@@ -77,8 +77,8 @@ def test_percent_declined_extended(normalize, text, expected):
         ("dwie złotówki", "2 zł"),
         ("sto złotówek", "100 zł"),
         ("jedna złotówka", "1 zł"),
-        ("złotówkę", "złotówka"),  # standalone without number -> lemmatized artifact
-        ("kupię złotówkę", "kupię złotówka"),
+        ("złotówkę", "złotówkę"),  # standalone without number stays unchanged
+        ("kupię złotówkę", "kupię złotówkę"),
     ],
 )
 def test_currency_zlotowka_extended(normalize, text, expected):

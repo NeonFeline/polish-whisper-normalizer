@@ -1024,7 +1024,7 @@ wheels = [
 
 [[package]]
 name = "polish-whisper-normalizer"
-version = "0.1.13"
+version = "0.1.16"
 source = { editable = "." }
 dependencies = [
     { name = "morfeusz2" },

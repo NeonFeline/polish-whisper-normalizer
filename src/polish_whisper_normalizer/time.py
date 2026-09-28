@@ -46,6 +46,7 @@ class PolishTimeNormalizer:
             return
 
         self.hours = {
+            "zerowa": 0,
             "pierwsza": 1,
             "druga": 2,
             "trzecia": 3,
@@ -72,6 +73,7 @@ class PolishTimeNormalizer:
             "dwudziesta czwarta": 24,
         }
         self.hours_gen = {
+            "zerowej": 0,
             "pierwszej": 1,
             "drugiej": 2,
             "trzeciej": 3,
@@ -159,6 +161,8 @@ class PolishTimeNormalizer:
         self._poludnie_pat = r"(?:południe|poludnie)"
 
         self._re_wpol = re.compile(r"\b" + wpol_pat + r"\s+do\s+(" + hours_gen_alt + r")\b")
+        # spaced "w pół do ósmej" (Whisper often splits wpół) -> same as wpół
+        self._re_wpol_spaced = re.compile(r"\bw\s+(?:pół|pol)\s+do\s+(" + hours_gen_alt + r")\b")
         self._re_za = re.compile(r"\bza\s+(" + minutes_alt + r")\s+(" + hours_alt + r")\b")
         self._re_po = re.compile(r"\b(" + minutes_alt + r")\s+po\s+(" + hours_gen_alt + r")\b")
         self._re_godzina_min = re.compile(
@@ -168,8 +172,17 @@ class PolishTimeNormalizer:
         self._re_o_godzinie_ord = re.compile(
             r"\bo\s+godzinie\s+(" + hours_gen_alt + r")\s+(" + minutes_ordinal_alt + r")\b"
         )
+        self._re_o_godzinie_card = re.compile(
+            r"\bo\s+godzinie\s+(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b"
+        )
         self._re_o_godzinie_hour = re.compile(
-            r"\bo\s+godzinie\s+(" + hours_gen_alt + r")\b(?!\s*(?:" + minutes_ordinal_alt + r")\b)"
+            r"\bo\s+godzinie\s+("
+            + hours_gen_alt
+            + r")\b(?!\s*(?:"
+            + minutes_ordinal_alt
+            + r"|"
+            + minutes_alt
+            + r")\b)"
         )
         # "godzina" + declined forms (godziny/godzinie/godzinę/…) + digits.
         # Whisper usually omits "godzina" but corpus hits like
@@ -186,8 +199,17 @@ class PolishTimeNormalizer:
         self._re_bare_dot_time = re.compile(r"\b(\d{1,2})\.(\d{2})\b(?!\.\d)")
         self._re_hour_min = re.compile(r"\b(" + hours_alt + r")\s+(" + minutes_alt + r")\b")
         self._re_hour_gen_min = re.compile(r"\b(" + hours_gen_alt + r")\s+(" + minutes_alt + r")\b")
+        # genitive hour + ordinal minutes with leading "o"
+        # ("o piątej trzydziestej" -> "o 5:30"). Bare (no "o") stays ordinal
+        # to avoid hijacking compound ordinals ("dwudziestej pierwszej" -> 21).
+        self._re_o_hour_gen_ord_min = re.compile(
+            r"\bo\s+(" + hours_gen_alt + r")\s+(" + minutes_ordinal_alt + r")\b"
+        )
         # "o piątej" -> "o 5:00" (genitive hour, not followed by a word)
         self._re_o_hour = re.compile(r"\bo\s+(" + hours_gen_alt + r")\b(?!\s*[a-ząćęłńóśźż])")
+        # digit hours: "o 11" -> "o 11:00" (not followed by word/time suffix),
+        # "o 11 rano"/"11 rano" with time-of-day markers (marker_alt defined below,
+        # placeholders wired after marker construction).
         # time-of-day markers (Morfeusz-inspired, covers rano + wieczorem/nocy/południu)
         marker_phrases = [
             "rano",
@@ -214,6 +236,15 @@ class PolishTimeNormalizer:
         self._re_o_hour_marker = re.compile(
             r"\bo\s+(" + hours_gen_alt + r")\s+(" + marker_alt + r")\b"
         )
+        # digit hours with markers ("11 rano" -> "11:00 rano",
+        # "o 11 rano" -> "o 11:00 rano"); lookbehind avoids matching minutes
+        # inside existing times ("5:15 rano" must not match "15 rano").
+        self._re_digit_marker = re.compile(
+            r"(?<![\d:])(?<!\d\s)(\d{1,2})\s+(" + marker_alt + r")\b"
+        )
+        self._re_o_digit_marker = re.compile(r"\bo\s+(\d{1,2})\s+(" + marker_alt + r")\b")
+        # digit hour after "o" ("o 11" -> "o 11:00", not followed by word)
+        self._re_o_digit_hour = re.compile(r"\bo\s+(\d{1,2})\b(?!\s*[:.,]\d)(?!\s*[a-ząćęłńóśźż])")
         # keep legacy rano regexes for backwards compat (they are now subset of marker)
         self._re_hour_rano = re.compile(r"\b(" + hours_alt + r")\s+rano\b")
         self._re_o_hour_rano = re.compile(r"\bo\s+(" + hours_gen_alt + r")\s+rano\b")
@@ -332,7 +363,7 @@ class PolishTimeNormalizer:
             80: "osiemdziesiąt",
             90: "dziewięćdziesiąt",
         }
-        kwadrans = {"kwadrans": 15}
+        kwadrans = {"kwadrans": 15, "kwadransa": 15}
 
         def cardinal(n: int) -> str:
             if n < 10:
@@ -423,17 +454,30 @@ class PolishTimeNormalizer:
         return "|".join(_escape_phrase(k) for k in keys)
 
     def __call__(self, s: str) -> str:
+        if not isinstance(s, str):
+            raise TypeError(f"Expected str, got {type(s).__name__}")
         s = self._re_godzina_digits.sub(self._godzina_digits_repl, s)
         s = self._re_o_godzinie_digits.sub(self._o_godzinie_digits_repl, s)
         s = self._re_godzina_digit_hour.sub(self._godzina_digit_hour_repl, s)
         s = self._re_o_godzinie_digit_hour.sub(self._o_godzinie_digit_hour_repl, s)
         s = self._re_bare_dot_time.sub(self._bare_dot_time_repl, s)
+        # "o godzinie" hour-alone before hour+minutes so compound hours
+        # ("dwudziestej pierwszej" = 21) claim before short hour+minutes
+        # ("dwudziestej" + "pierwszej" = 20:01); hour-alone lookahead blocks
+        # both cardinal and ordinal minutes.
         s = self._re_o_godzinie_hour.sub(self._o_godzinie_hour_repl, s)
+        s = self._re_o_godzinie_card.sub(self._o_godzinie_ord_repl, s)
         s = self._re_o_godzinie_ord.sub(self._o_godzinie_ord_repl, s)
+        s = self._re_wpol_spaced.sub(
+            lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
+        )
         s = self._re_wpol.sub(
             lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
         )
         # handle time-of-day markers: generic marker before narrow "rano" to capture all
+        # digit markers first (most specific), then word markers
+        s = self._re_o_digit_marker.sub(self._o_digit_marker_repl, s)
+        s = self._re_digit_marker.sub(self._digit_marker_repl, s)
         s = self._re_o_hour_marker.sub(self._o_hour_marker_repl, s)
         s = self._re_hour_marker.sub(self._hour_marker_repl, s)
         # legacy rano handlers (kept for compat, now redundant but harmless)
@@ -463,6 +507,13 @@ class PolishTimeNormalizer:
             s,
         )
         # convert midnight/noon: contextual prep+form and standalone nominative; bare declined like "północy" stays word
+        # protect redundant time phrases like "12:00 w południe" / "0:00 o północy"
+        s = re.sub(r"\b(?:12:00|12)\s+w\s+(?:południe|poludnie)\b", _protect_geo, s)
+        s = re.sub(
+            r"\b(?:0:00|24:00|0|24)\s+(?:o\s+)?(?:północy|polnocy|północ|polnoc)\b",
+            _protect_geo,
+            s,
+        )
         s = self._re_polnoc_context.sub(lambda m: f"{m.group(1)} 0:00", s)
         s = self._re_poludnie_context.sub(lambda m: f"{m.group(1)} 12:00", s)
         s = self._re_polnoc_nominative.sub("0:00", s)
@@ -476,6 +527,8 @@ class PolishTimeNormalizer:
         s = self._re_hour_min.sub(self._hour_min_repl, s)
         s = self._re_hour_gen_min.sub(self._hour_gen_min_repl, s)
         s = self._re_o_hour.sub(self._o_hour_repl, s)
+        s = self._re_o_hour_gen_ord_min.sub(self._o_hour_gen_ord_min_repl, s)
+        s = self._re_o_digit_hour.sub(self._o_digit_hour_repl, s)
         s = self._re_za_minut.sub(self._za_repl, s)
         s = self._re_po_minut.sub(self._po_repl, s)
         s = self._re_range.sub(self._range_repl, s)
@@ -543,23 +596,41 @@ class PolishTimeNormalizer:
         hour, minute = int(m.group(1)), int(m.group(2))
         if hour > 24 or minute > 59:
             return m.group(0)
-        # Hour 0 (0.05, 0.25, 0.50, etc.) is NEVER a bare dot clock time in Polish.
-        # Clock time for 00:00/0:00 requires context ("godzina 0.00", "o 0.00").
-        if hour == 0:
-            return m.group(0)
-        # Preserve day.month dates: DD.MM with MM 01-12 stays dotted
-        # (e.g. 21.05 May 21, 05.05, 01.01). Times like 18.30 (MM 30)
-        # cannot be dates and convert to 18:30.
-        if 1 <= hour <= 31 and 1 <= minute <= 12:
-            return m.group(0)
 
-        # Preserve units of measurement, quantities, and currencies
+        # context for disambiguation (computed early so hour-0 and date
+        # guards can be overridden by explicit time prepositions)
         full = m.string
         start, end = m.start(), m.end()
         after = full[end : end + 15].lower()
         before = full[max(0, start - 15) : start].lower()
         after_stripped = after.lstrip()
         before_stripped = before.rstrip()
+        has_time_prep = bool(re.search(r"\b(?:o|od|do|około|okolo|koło|kolo)\s*$", before_stripped))
+        # time-of-day marker after the number ("5.30 rano") also signals time
+        has_marker_after = bool(
+            re.match(
+                r"(?:rano|wieczorem|w\s+nocy|nocą|noca|nad\s+ranem|w\s+dzień|w\s+dzien)\b",
+                after_stripped,
+            )
+        )
+        has_time_context = has_time_prep or has_marker_after
+
+        # Preposition "o" specifically signals clock time ("o 5.05"), whereas "od", "do",
+        # "około" frequently introduce date ranges ("od 5.05 do 10.05") where MM 01-12 must stay dates.
+        has_o_prep = bool(re.search(r"\bo\s*$", before_stripped))
+        has_date_override = has_o_prep or has_marker_after
+
+        # Hour 0 needs explicit context ("godzina 0.00" handled elsewhere,
+        # "o 0.00" here). Bare "0.00" stays decimal/number.
+        if hour == 0 and not has_time_context:
+            return m.group(0)
+        # Preserve day.month dates: DD.MM with MM 01-12 stays dotted
+        # (e.g. 21.05 May 21, 05.05, 01.01, od 5.05 do 10.05). Only explicit
+        # time context ("o 5.05", "5.05 rano") overrides the date guard.
+        if 1 <= hour <= 31 and 1 <= minute <= 12 and not has_date_override:
+            return m.group(0)
+
+        # Preserve units of measurement, quantities, and currencies
 
         # Check for currency or percent symbols
         if after_stripped[:1] in {"$", "€", "£", "¢", "%"}:
@@ -631,9 +702,8 @@ class PolishTimeNormalizer:
                     return m.group(0)
 
         # Bare times require round minutes (M % 5 == 0) and daytime/evening hour (H >= 6)
-        # unless preceded by explicit time prepositions (o, od, do, około, koło)
-        has_time_prep = bool(re.search(r"\b(?:o|od|do|około|okolo|koło|kolo)\s*$", before_stripped))
-        if not has_time_prep:
+        # unless explicit time context (preposition or marker) is present.
+        if not has_time_context:
             if hour < 6:
                 return m.group(0)
             if minute % 5 != 0:
@@ -667,8 +737,65 @@ class PolishTimeNormalizer:
 
     def _o_godzinie_ord_repl(self, m: re.Match[str]) -> str:
         hour = self.hours_gen[self._norm_phrase(m.group(1))]
+        minute_phrase = self._norm_phrase(m.group(2))
+        # shared by ordinal ("o godzinie szesnastej piątej") and cardinal
+        # ("o godzinie piątej trzydzieści") minute variants
+        minute = self.minutes_ordinal.get(minute_phrase)
+        if minute is None:
+            minute = self.minutes.get(minute_phrase)
+        if minute is None:  # pragma: no cover – regex guarantees a hit
+            return m.group(0)
+        return f"o {hour}:{minute:02d}"
+
+    def _hour_gen_ord_min_repl(self, m: re.Match[str]) -> str:
+        # kept for backwards compat (bare genitive+ordinal now handled via
+        # o-prefixed version to avoid ordinal hijack); not used in pipeline
+        hour = self.hours_gen[self._norm_phrase(m.group(1))]
+        minute = self.minutes_ordinal[self._norm_phrase(m.group(2))]
+        return f"{hour}:{minute:02d}"
+
+    def _o_hour_gen_ord_min_repl(self, m: re.Match[str]) -> str:
+        hour = self.hours_gen[self._norm_phrase(m.group(1))]
         minute = self.minutes_ordinal[self._norm_phrase(m.group(2))]
         return f"o {hour}:{minute:02d}"
+
+    def _o_digit_marker_repl(self, m: re.Match[str]) -> str:
+        hour = int(m.group(1))
+        if hour > 24:
+            return m.group(0)
+        marker = self._norm_phrase(m.group(2))
+        return f"o {hour}:00 {marker}"
+
+    def _digit_marker_repl(self, m: re.Match[str]) -> str:
+        hour = int(m.group(1))
+        if hour > 24:
+            return m.group(0)
+        marker = self._norm_phrase(m.group(2))
+        return f"{hour}:00 {marker}"
+
+    def _o_digit_hour_repl(self, m: re.Match[str]) -> str:
+        hour = int(m.group(1))
+        if hour > 24:
+            return m.group(0)
+        # Check context before "o <hour>":
+        full = m.string
+        start = m.start()
+        before = full[max(0, start - 25) : start].lower()
+        # Words indicating difference, increase/decrease, count, or prepositional usage:
+        # e.g. "zwiększyć o 5", "mniej o 2", "chodzi o 1", "pomylił się o 3", "różnica o 4"
+        if re.search(
+            r"\b(?:mniej|więcej|zwiększ\w*|zmniejsz\w*|wzros\w*|spad\w*|podn\w*|obniż\w*|"
+            r"pomyl\w*|spóźn\w*|różnic\w*|błąd\w*|chodz\w*|pyta\w*|prosi\w*|walcz\w*|"
+            r"apel\w*|popraw\w*|zmień\w*|zmien\w*|skróć\w*|skroc\w*|wydłuż\w*|wydluz\w*|"
+            r"wygra\w*|przegra\w*)\s*$",
+            before,
+        ):
+            return m.group(0)
+        # Hours 1-5 without explicit time markers (e.g. "rano", "godzina")
+        # are almost exclusively delta/counting tokens in Polish ("o 1", "o 2", "o 3", "o 4", "o 5")
+        if hour < 6:
+            return m.group(0)
+        return f"o {hour}:00"
 
     def _o_godzinie_hour_repl(self, m: re.Match[str]) -> str:
         hour = self.hours_gen[self._norm_phrase(m.group(1))]

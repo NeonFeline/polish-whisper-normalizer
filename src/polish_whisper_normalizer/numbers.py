@@ -16,7 +16,12 @@ from collections.abc import Iterator
 from fractions import Fraction
 
 from .lemmatizer import PolishLemmatizer
-from .utils import strip_diacritics, with_ascii_variants, with_ascii_variants_set
+from .utils import (
+    normalize_vulgar_fractions,
+    strip_diacritics,
+    with_ascii_variants,
+    with_ascii_variants_set,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -296,13 +301,16 @@ class PolishNumberNormalizer:
             "listopad": "11",
             "grudzień": "12",
             # abbreviated months (Morfeusz-independent, common in refs)
+            # NOTE: "sie" (sierpień) removed – collides with the reflexive
+            # pronoun "się"/"sie" (diacritic-less ASR), causing false dates
+            # ("5 sie" pronoun -> "05.08"). Use full "sierpień"/"sierpnia".
             "sty": "1",
             "lut": "2",
             "mar": "3",
             "kwi": "4",
             "cze": "6",
             "lip": "7",
-            "sie": "8",
+            "sier": "8",
             "wrz": "9",
             "paź": "10",
             "lis": "11",
@@ -474,7 +482,7 @@ class PolishNumberNormalizer:
         self._canon_cache[word] = result
         return result
 
-    def process_words(self, words: list[str]) -> Iterator[str]:
+    def process_words(self, words: list[str], orig_words: list[str] | None = None) -> Iterator[str]:
         prefix: str | None = None
         value: str | int | None = None
         ordinal = False
@@ -501,7 +509,15 @@ class PolishNumberNormalizer:
         if len(words) == 0:
             return
 
-        for prev, current, next in _windowed_3([None, *words, None]):  # type: ignore[list-item]
+        padded: list[str | None] = [None, *words, None]
+        orig_padded: list[str | None] = (
+            [None, *orig_words, None] if orig_words is not None else padded
+        )
+        for idx in range(len(padded) - 2):
+            prev, current, next = padded[idx], padded[idx + 1], padded[idx + 2]
+            orig_current = orig_padded[idx + 1]
+            if orig_current is None:
+                orig_current = current
             if skip:
                 skip = False
                 continue
@@ -553,8 +569,9 @@ class PolishNumberNormalizer:
                         yield output(current)  # type: ignore[arg-type]
                         continue
                 # Pronominal "jeden" (not numeral): "wszystko mi było jedno",
-                # "chciałem tylko jednego" (canonicalized to "jeden") stays a
-                # word (bug 7, like "Maja"/"na północ" guards).
+                # "chciałem tylko jednego" stays a word (bug 7, like
+                # "Maja"/"na północ" guards). Preserve original inflection
+                # ("jedną" stays "jedną", not lemmatized to "jeden").
                 if current in {"jeden", "jedna", "jedno"} and prev in {
                     "było",
                     "bylo",
@@ -566,7 +583,7 @@ class PolishNumberNormalizer:
                 }:
                     if value is not None:
                         yield output(value)  # type: ignore[arg-type]
-                    yield output(current)  # type: ignore[arg-type]
+                    yield output(orig_current)  # type: ignore[arg-type]
                     continue
                 ones = self.ones[current]
                 if value is None:
@@ -667,7 +684,17 @@ class PolishNumberNormalizer:
                 else:
                     before = value // 1000 * 1000
                     residual = value % 1000
-                    value = before + residual * multiplier
+                    if residual == 0:
+                        # bare multiplier after a complete thousand-group
+                        # ("tysiąc tysięcy", "dwa miliony tysiąc"): do not
+                        # drop the second multiplier (old code computed
+                        # before+0*M == before). Split into separate numerals
+                        # to preserve information and avoid inventing huge
+                        # tokens (bug 5 philosophy).
+                        yield output(value)  # type: ignore[arg-type]
+                        value = multiplier
+                    else:
+                        value = before + residual * multiplier
             elif current in self.ones_ordinal:
                 ones = self.ones_ordinal[current]
                 if value is None:
@@ -736,14 +763,17 @@ class PolishNumberNormalizer:
                 if value is not None:
                     yield output(str(value) + " " + self.currencies[current])
                 elif current.isalpha():
-                    yield output(current)  # type: ignore[arg-type]
+                    # standalone currency without amount: keep original
+                    # inflection ("złotówkę" stays, "procentach" stays) instead
+                    # of lemmatized artifact.
+                    yield output(orig_current)  # type: ignore[arg-type]
                 # else: stray currency symbol with no amount -> drop
             elif current in self.suffixers:
                 # apply suffix symbols (procent -> '%')
                 if value is not None:
                     yield output(str(value) + self.suffixers[current])
                 else:
-                    yield output(current)  # type: ignore[arg-type]
+                    yield output(orig_current)  # type: ignore[arg-type]
             elif current in self.specials:
                 # decimal separators ("przecinek", "kropka")
                 if next in self.decimals or next_is_numeric:
@@ -773,15 +803,26 @@ class PolishNumberNormalizer:
             yield output(value)
 
     def preprocess(self, s: str) -> str:
+        s = normalize_vulgar_fractions(s)
+        # join hyphenated compound words with prefixes "pół-", "ćwierć-":
+        # "pół-finał" -> "półfinał", "ćwierć-finał" -> "ćwierćfinał", "pół-żartem" -> "półżartem"
+        s = re.sub(r"\b(pół|pol|ćwierć|cwierc)-\s*([a-ząćęłńóśźż]+)\b", r"\1\2", s)
         # ellipsis marks a sentence boundary: keep the boundary (so adjacent
         # spelled-out numbers are not merged) but drop the "." later
         s = re.sub(r"(?:\s*\.){2,}\s*|\s*…\s*", " . ", s)
         # "i pół" -> "przecinek pięć" (two and a half -> 2.5) – also ASCII "pol"
-        s = re.sub(r"\bi\s+(?:pół|pol)\b", "przecinek pięć", s)
-        s = re.sub(r"\b(?:półtora|poltora)\b", "jeden przecinek pięć", s)
-        s = re.sub(r"\b(?:półtorej|poltorej)\b", "jeden przecinek pięć", s)
+        s = re.sub(r"\bi\s+(?:pół|pol)\b(?!-)", "przecinek pięć", s)
+        s = re.sub(r"\b(?:półtora|poltora)\b(?!-[a-ząćęłńóśźż])", "jeden przecinek pięć", s)
+        s = re.sub(r"\b(?:półtorej|poltorej)\b(?!-[a-ząćęłńóśźż])", "jeden przecinek pięć", s)
         # standalone "pół" (half) -> "0.5"
-        s = re.sub(r"\b(?:pół|pol)\b", "zero przecinek pięć", s)
+        # Protect hyphenated compound words (e.g. "pół-finał", "pół-żartem", "pół-serio")
+        s = re.sub(r"(?<!-)\b(?:pół|pol)\b(?!-[a-ząćęłńóśźż])", "zero przecinek pięć", s)
+        # quarter: "ćwierć" (one quarter) -> "0.25", "i ćwierć" -> "+0.25"
+        # (ASCII "cwierc" for diacritic-less ASR). Only singular nominative;
+        # plural "ćwierci" stays a word (like "zerowych").
+        # Protect hyphenated compounds (e.g. "ćwierć-finał")
+        s = re.sub(r"\bi\s+(?:ćwierć|cwierc)\b(?!-)", "przecinek dwa pięć", s)
+        s = re.sub(r"(?<!-)\b(?:ćwierć|cwierc)\b(?!-[a-ząćęłńóśźż])", "zero przecinek dwa pięć", s)
 
         # normalize currency symbols to follow the amount ("€10" -> "10 €",
         # "10€" -> "10 €", "$1.50" -> "1.50 $").
@@ -853,6 +894,9 @@ class PolishNumberNormalizer:
             return dec
 
         s = re.sub(r"\b(\d+)/(\d+)\b", _standalone_frac_repl, s)
+        # Normalize signed zero ("-0", "+0", "-0.0" -> "0"): negative zero
+        # equals zero and otherwise breaks WER convergence ("minus zero").
+        s = re.sub(r"(?<![\d.:/-])([+-])0+(?:\.0+)?(?![\d.:/-])", "0", s)
         # Strip leading zeros for idempotency ("007" -> "7", "005" -> "5"):
         # word-form "zero zero siedem" glues to "007" on pass 1 but digit
         # "007" goes via Fraction to 7, so N(N(x)) != N(x) (bug 6a).
@@ -1122,9 +1166,15 @@ class PolishNumberNormalizer:
         return result
 
     def __call__(self, s: str) -> str:
+        if not isinstance(s, str):
+            raise TypeError(f"Expected str, got {type(s).__name__}")
         s = self.preprocess(s)
-        words = self._convert_fractions(s.split())
-        words = [self._canonicalize(w) for w in words]
-        s = " ".join(word for word in self.process_words(words) if word is not None and word != ".")
+        frac_words = self._convert_fractions(s.split())
+        canon_words = [self._canonicalize(w) for w in frac_words]
+        s = " ".join(
+            word
+            for word in self.process_words(canon_words, frac_words)
+            if word is not None and word != "."
+        )
         s = self.postprocess(s)
         return s

@@ -37,12 +37,10 @@ def test_normalizer_throughput_regression(normalizer: PolishTextNormalizer) -> N
         warmup=2,
     )
     # Conservative threshold: should easily exceed 300 texts/sec on any modern CPU
-    assert (
-        result.items_per_sec > 300.0
-    ), f"Throughput regressed below 300 texts/s: got {result.items_per_sec:.1f} texts/s"
-    assert (
-        result.latency_p95_ms < 15.0
-    ), f"p95 latency exceeded 15ms: got {result.latency_p95_ms:.2f}ms"
+    msg_t = f"Throughput regressed below 300 texts/s: got {result.items_per_sec:.1f} texts/s"
+    assert result.items_per_sec > 300.0, msg_t
+    msg_l = f"p95 latency exceeded 15ms: got {result.latency_p95_ms:.2f}ms"
+    assert result.latency_p95_ms < 15.0, msg_l
 
 
 def test_short_utterance_latency(normalizer: PolishTextNormalizer) -> None:
@@ -54,9 +52,8 @@ def test_short_utterance_latency(normalizer: PolishTextNormalizer) -> None:
         iterations=5,
         warmup=2,
     )
-    assert (
-        result.latency_p95_ms < 2.0
-    ), f"Short turn p95 latency too high: got {result.latency_p95_ms:.2f}ms"
+    msg = f"Short turn p95 latency too high: got {result.latency_p95_ms:.2f}ms"
+    assert result.latency_p95_ms < 2.0, msg
 
 
 def test_workload_benchmarks_run() -> None:

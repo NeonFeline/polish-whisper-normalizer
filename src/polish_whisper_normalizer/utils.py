@@ -5,6 +5,7 @@ Keeps diacritic handling in one place so normalizers don't duplicate logic.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .basic import remove_symbols_and_diacritics
@@ -33,3 +34,48 @@ def with_ascii_variants_set(values: set[str]) -> set[str]:
         if stripped != key:
             expanded.add(stripped)
     return expanded
+
+
+# vulgar fractions (single codepoint) -> "num/den" for WER convergence
+# ("½" -> "1/2" which postprocess maps to "0.5" like "jedna druga").
+_VULGAR_FRACTIONS: dict[str, str] = {
+    "¼": "1/4",
+    "½": "1/2",
+    "¾": "3/4",
+    "⅐": "1/7",
+    "⅑": "1/9",
+    "⅒": "1/10",
+    "⅓": "1/3",
+    "⅔": "2/3",
+    "⅕": "1/5",
+    "⅖": "2/5",
+    "⅗": "3/5",
+    "⅘": "4/5",
+    "⅙": "1/6",
+    "⅚": "5/6",
+    "⅛": "1/8",
+    "⅜": "3/8",
+    "⅝": "5/8",
+    "⅞": "7/8",
+}
+
+_FRACTION_SLASH = "⁄"  # U+2044 produced by NFKC("½") -> "1⁄2"
+
+
+def normalize_vulgar_fractions(s: str) -> str:
+    """Replace vulgar fractions with ASCII ``num/den`` forms.
+
+    Digit-prefixed forms (``1½``) become mixed numbers (``1 i 1/2``) so the
+    existing ``X i Y/Z`` postprocess yields ``1.5`` like ``dwa i pół``.
+    Also normalizes U+2044 fraction slash to ``/``.
+    """
+    if _FRACTION_SLASH in s:
+        s = s.replace(_FRACTION_SLASH, "/")
+    if not any(v in s for v in _VULGAR_FRACTIONS):
+        return s
+    # digit + vulgar (no space required): "1½" -> "1 i 1/2"
+    for vulg, frac in _VULGAR_FRACTIONS.items():
+        if vulg in s:
+            s = re.sub(r"(\d+)\s*" + re.escape(vulg), r"\1 i " + frac, s)
+            s = s.replace(vulg, frac)
+    return s

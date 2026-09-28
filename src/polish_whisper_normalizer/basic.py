@@ -58,9 +58,9 @@ def remove_symbols(s: str, keep: str = "") -> str:
     Replace any other markers, symbols, punctuations with a space, keeping diacritics
     (and any characters listed in `keep`). Uses NFKC to keep composed diacritics intact.
     """
+    s = unicodedata.normalize("NFKC", s).replace("⁄", "/")
     return "".join(
-        c if c in keep else (" " if unicodedata.category(c)[0] in "MSP" else c)
-        for c in unicodedata.normalize("NFKC", s)
+        c if c in keep else (" " if unicodedata.category(c)[0] in "MSP" else c) for c in s
     )
 
 
@@ -77,6 +77,8 @@ class BasicTextNormalizer:
         self.split_letters: bool = split_letters
 
     def __call__(self, s: str) -> str:
+        if not isinstance(s, str):
+            raise TypeError(f"Expected str, got {type(s).__name__}")
         s = s.lower()
         s = self._BRACKETS_RE.sub("", s)  # remove words between brackets
         s = self._PAREN_RE.sub("", s)  # remove words between parenthesis

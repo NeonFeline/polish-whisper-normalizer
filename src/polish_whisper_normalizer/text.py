@@ -9,6 +9,7 @@ import re
 from .basic import remove_symbols
 from .numbers import PolishNumberNormalizer
 from .time import PolishTimeNormalizer
+from .utils import normalize_vulgar_fractions
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +21,24 @@ class PolishTextNormalizer:
     _WS_RE = re.compile(r"\s+")
     _IGNORE_RE = re.compile(r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b")
     _SENTENCE_PERIOD_RE = re.compile(r"(?<![\d.])\.(?!\.)([^0-9]|$)")
-    _ELLIPSIS_RE = re.compile(r"\s*(?:\.\s*){2,}|\s*…\s*")
+    _ELLIPSIS_RE = re.compile(r"(?:\s*\.){2,}\s*|\s*…\s*")
     _NUMBER_SEPARATOR_RE = re.compile(r"[,;!?—–]")
     _TRAILING_DIGIT_PERIOD_RE = re.compile(r"(?<=\d)\.(?=\s|$)")
     _R_ABBREV_RE = re.compile(r"\br\.?\s*(?=\d{3,4}\b)")
     _DECIMAL_COMMA_RE = re.compile(r"(\d),(\d)")
     _MONTH_DAY_RE = re.compile(r"(\d+)\.?\s+([a-ząćęłńóśźż]+)\b")
-    _FULL_DATE_ROKU_BEFORE_RE = re.compile(r"(\d+)\.\s+(\d+)\s+(?:roku|r\.?)\s+(\d+)\.?")
-    _FULL_DATE_ROKU_AFTER_RE = re.compile(r"(\d+)\.\s+(\d+)\s+(\d+)\.?\s+(?:roku|r\.?)\b")
-    _FULL_DATE_RE = re.compile(r"(\d+)\.\s+(\d+)\s+(\d{4})\.?")
+    _FULL_DATE_ROKU_BEFORE_RE = re.compile(r"(\d+)\.\s*(\d+)[.\s]+\s*(?:roku|r\.?)\s+(\d+)\.?")
+    _FULL_DATE_ROKU_AFTER_RE = re.compile(r"(\d+)\.\s*(\d+)[.\s]+(\d+)\.?\s+(?:roku|r\.?)\b")
+    _FULL_DATE_RE = re.compile(r"(\d+)\.\s*(\d+)[.\s]+(\d{4})\.?")
     _TRAILING_R_RE1 = re.compile(r"(\d{2}\.\d{2}\.\d{4})\s+r\.?\b")
     _TRAILING_R_RE2 = re.compile(r"(\d{2}\.\d{2}\.\d{4})r\.?\b")
+    # standalone year with trailing "r."/"roku" ("1860 r." -> "1860")
+    _YEAR_TRAILING_R_RE = re.compile(r"\b(\d{3,4})\s+(?:r\.?|roku)\b")
+    # day.month without year requires a space ("5. 5" -> "05.05") to avoid
+    # turning decimals ("2.5", "3.14") into dates; full dates with 4-digit
+    # year allow no space ("5.5.2026" -> "05.05.2026", safe: no decimal has year)
     _DAY_MONTH_RE = re.compile(r"(\d+)\.\s+(\d+)\b(?!\.)")
+    _PERCENT_GLUE_RE = re.compile(r"(\d)\s+%")
     _PERCENT_RE = re.compile(r"([^0-9])%")
     _COLON_RE = re.compile(r"(?<!\d):|:(?!\d)")
     _SIGN_RE = re.compile(r"[-+](?!\d)")
@@ -53,15 +60,17 @@ class PolishTextNormalizer:
     _ABBREV_ITD_SHORT_RE = re.compile(r"\bitd\s*\.?(?=\s|$)")
     _ABBREV_ITP_SHORT_RE = re.compile(r"\bitp\s*\.?(?=\s|$)")
     _ABBREV_GODZ_RE = re.compile(r"\bgodz\.(?=\s|$)|\bgodz\b")
-    _ABBREV_UL_FULL_RE = re.compile(r"\bulic\w*\b")
-    _ABBREV_UL_SHORT_RE = re.compile(r"\bul\s*\.?(?=\s|$)")
-    _ABBREV_NR_FULL_RE = re.compile(r"\bnumer\w*\b")
-    _ABBREV_NR_SHORT_RE = re.compile(r"\bnr\s*\.?(?=\s|$)")
-    _ABBREV_DR_FULL_RE = re.compile(r"\bdoktor\w*\b")
-    _ABBREV_DR_SHORT_RE = re.compile(r"\bdr\s*\.?(?=\s|$)")
-    _ABBREV_PROF_FULL_RE = re.compile(r"\bprofesor\w*\b")
-    _ABBREV_PROF_SHORT_RE = re.compile(r"\bprof\s*\.?(?=\s|$)")
-    _ABBREV_OK_RE = re.compile(r"\bok\.(?=\s|$)")
+    _ABBREV_UL_FULL_RE = re.compile(r"\bulic(?:a|y|e|ę|o|ą|om|ami|ach)\b")
+    _ABBREV_UL_SHORT_RE = re.compile(r"\bul\.(?=\s|$)")
+    _ABBREV_NR_FULL_RE = re.compile(r"\bnumer(?:u|owi|em|ze|y|ów|om|ami|ach)?\b")
+    _ABBREV_NR_SHORT_RE = re.compile(r"\bnr\.(?=\s|$)")
+    _ABBREV_DR_FULL_RE = re.compile(r"\bdoktor(?:a|owi|em|ze|zy|ów|om|ami|ach)?\b")
+    _ABBREV_DR_SHORT_RE = re.compile(r"\bdr\.(?=\s|$)")
+    _ABBREV_PROF_FULL_RE = re.compile(r"\bprofesor(?:a|owi|em|ze|owie|ów|om|ami|ach)?\b")
+    _ABBREV_PROF_SHORT_RE = re.compile(r"\bprof\.(?=\s|$)")
+    _ABBREV_OK_RE = re.compile(
+        r"\bok\.\s*(?=\d|\b(?:godz|południ|poludni|północ|polnoc|st|lut|mar|kwi|maj|cze|lip|sie|wrz|paź|paz|lis|gru|jed|dw|trz|czt|pię|pie|sze|sie|osi|dzi|sto|tys|mil|bil|pół|pol)\w*)"
+    )
 
     def __init__(self, date_format: str = "{day:02d}.{month:02d}.{year}", **kwargs: object) -> None:
         """
@@ -85,25 +94,24 @@ class PolishTextNormalizer:
         fmt = self.date_format
         has_brace = "{" in fmt and "}" in fmt
         has_percent = "%" in fmt
-        # prefer explicit brace-format; if both present try brace first
+
         if has_brace:
             try:
                 return fmt.format(day=day, month=month, year=year)
             except Exception as exc:
                 logger.debug("brace date_format failed for %r: %s", fmt, exc)
-                if not has_percent:
-                    return f"{day:02d}.{month:02d}.{year}"
+
         if has_percent:
             try:
-                return datetime.datetime(year, month, day).strftime(fmt)
+                out = datetime.datetime(year, month, day).strftime(fmt)
+                # unknown/invalid strftime codes leak "%" (e.g. "%Q" -> "%Q");
+                # fall back to the default instead of leaking the format string
+                if "%" in out:
+                    raise ValueError(f"strftime leaked % for {fmt!r} -> {out!r}")
+                return out
             except Exception as exc:
                 logger.debug("strftime date_format failed for %r: %s", fmt, exc)
-        # fallback: brace format if not tried
-        if not has_brace:
-            try:
-                return fmt.format(day=day, month=month, year=year)
-            except Exception as exc:
-                logger.debug("fallback brace format failed for %r: %s", fmt, exc)
+
         return f"{day:02d}.{month:02d}.{year}"
 
     def _month_number(self, word: str) -> str | None:
@@ -120,7 +128,10 @@ class PolishTextNormalizer:
         return None
 
     def __call__(self, s: str) -> str:
-        s = s.lower()
+        if not isinstance(s, str):
+            raise TypeError(f"Expected str, got {type(s).__name__}")
+        s = normalize_vulgar_fractions(s.lower())
+        s = re.sub(r"\b(pół|pol|ćwierć|cwierc)-\s*([a-ząćęłńóśźż]+)\b", r"\1\2", s)
 
         # Polish abbreviations <-> spoken forms (bug 8): normalize both sides
         # to the same token ("tak zwany" <-> "tzw" -> "tzw", "np." -> "np",
@@ -190,21 +201,32 @@ class PolishTextNormalizer:
         s = self._MONTH_DAY_RE.sub(_date_repl, s)
 
         # full date formatting: "5. 5 roku 2026." -> "05.05.2026", "5. 5 2026" -> "05.05.2026" (uniform, no r)
+        # digit dates without spaces ("5.5.2026") also converge; month 1-12
+        # guard avoids turning decimals ("3.14", month 14) into dates.
         def _full_date_roku_before(m: re.Match[str]) -> str:
             day, month, year = m.group(1), m.group(2), m.group(3)
+            if not 1 <= int(month) <= 12:
+                return m.group(0)
             return self._format_date(int(day), int(month), int(year))
 
         def _full_date_roku_after(m: re.Match[str]) -> str:
             day, month, year = m.group(1), m.group(2), m.group(3)
+            if not 1 <= int(month) <= 12:
+                return m.group(0)
             return self._format_date(int(day), int(month), int(year))
 
         def _full_date(m: re.Match[str]) -> str:
             day, month, year = m.group(1), m.group(2), m.group(3)
+            if not 1 <= int(month) <= 12:
+                return m.group(0)
             return self._format_date(int(day), int(month), int(year))
 
         def _day_month(m: re.Match[str]) -> str:
-            day, month = m.group(1), m.group(2)
-            return f"{int(day):02d}.{int(month):02d}"
+            day, month = int(m.group(1)), int(m.group(2))
+            # validate to avoid decimals ("3.14" month 14) becoming dates
+            if not 1 <= month <= 12 or not 1 <= day <= 31:
+                return m.group(0)
+            return f"{day:02d}.{month:02d}"
 
         # order matters: most specific first (handle roku and r. uniformly)
         s = self._FULL_DATE_ROKU_BEFORE_RE.sub(_full_date_roku_before, s)
@@ -225,6 +247,8 @@ class PolishTextNormalizer:
         if not _wants_r:
             s = self._TRAILING_R_RE1.sub(r"\1", s)
             s = self._TRAILING_R_RE2.sub(r"\1", s)
+            # standalone year with trailing r/roku ("1860 r." -> "1860")
+            s = self._YEAR_TRAILING_R_RE.sub(r"\1", s)
         # day month without year -> 5. 5 -> 05.05 (as requested)
         # only when month is not ordinal (no trailing dot) – avoids "1. 2." -> "01.02."
         s = self._DAY_MONTH_RE.sub(_day_month, s)
@@ -233,6 +257,9 @@ class PolishTextNormalizer:
         # dot from already-digit input ("15." -> "15") for consistency
         s = self._TRAILING_DIGIT_PERIOD_RE.sub("", s)
 
+        # glue digit-space-percent ("5 %" -> "5%") before dropping stray "%"
+        # ("a%b" -> "a b", but "5%" stays)
+        s = self._PERCENT_GLUE_RE.sub(r"\1%", s)
         # remove leftover symbols that are not part of a number/time
         s = self._PERCENT_RE.sub(r"\1 ", s)
         s = self._COLON_RE.sub(" ", s)

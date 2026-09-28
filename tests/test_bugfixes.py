@@ -195,7 +195,8 @@ def test_idempotency_bugfixes(normalize, text):
 
 def test_pronominal_jeden_stays_word(normalize):
     assert normalize("wszystko mi było jedno") == "wszystko mi było jedno"
-    assert normalize("chciałem tylko jednego") == "chciałem tylko jeden"
+    assert normalize("chciałem tylko jednego") == "chciałem tylko jednego"
+    assert normalize("było jedną") == "było jedną"
     # numeral uses still convert
     assert normalize("jeden") == "1"
     assert normalize("jeden kot") == "1 kot"

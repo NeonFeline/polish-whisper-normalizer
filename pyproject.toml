@@ -1,6 +1,6 @@
 [project]
 name = "polish-whisper-normalizer"
-version = "0.1.13"
+version = "0.1.15"
 description = "Polish text normalizer for Whisper ASR output (keeps diacritics, normalizes numbers, time, currency)"
 readme = "README.md"
 license = { text = "MIT" }
@@ -86,6 +86,7 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "."]
 addopts = "-q"
 
 [tool.coverage.run]

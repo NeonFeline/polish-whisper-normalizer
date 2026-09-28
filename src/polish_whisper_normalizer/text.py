@@ -20,7 +20,7 @@ class PolishTextNormalizer:
     _WS_RE = re.compile(r"\s+")
     _IGNORE_RE = re.compile(r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b")
     _SENTENCE_PERIOD_RE = re.compile(r"(?<![\d.])\.(?!\.)([^0-9]|$)")
-    _ELLIPSIS_RE = re.compile(r"\s*(?:\.\s*){2,}|\s*…\s*")
+    _ELLIPSIS_RE = re.compile(r"(?:\s*\.){2,}\s*|\s*…\s*")
     _NUMBER_SEPARATOR_RE = re.compile(r"[,;!?—–]")
     _TRAILING_DIGIT_PERIOD_RE = re.compile(r"(?<=\d)\.(?=\s|$)")
     _R_ABBREV_RE = re.compile(r"\br\.?\s*(?=\d{3,4}\b)")
@@ -53,15 +53,17 @@ class PolishTextNormalizer:
     _ABBREV_ITD_SHORT_RE = re.compile(r"\bitd\s*\.?(?=\s|$)")
     _ABBREV_ITP_SHORT_RE = re.compile(r"\bitp\s*\.?(?=\s|$)")
     _ABBREV_GODZ_RE = re.compile(r"\bgodz\.(?=\s|$)|\bgodz\b")
-    _ABBREV_UL_FULL_RE = re.compile(r"\bulic\w*\b")
-    _ABBREV_UL_SHORT_RE = re.compile(r"\bul\s*\.?(?=\s|$)")
-    _ABBREV_NR_FULL_RE = re.compile(r"\bnumer\w*\b")
-    _ABBREV_NR_SHORT_RE = re.compile(r"\bnr\s*\.?(?=\s|$)")
-    _ABBREV_DR_FULL_RE = re.compile(r"\bdoktor\w*\b")
-    _ABBREV_DR_SHORT_RE = re.compile(r"\bdr\s*\.?(?=\s|$)")
-    _ABBREV_PROF_FULL_RE = re.compile(r"\bprofesor\w*\b")
-    _ABBREV_PROF_SHORT_RE = re.compile(r"\bprof\s*\.?(?=\s|$)")
-    _ABBREV_OK_RE = re.compile(r"\bok\.(?=\s|$)")
+    _ABBREV_UL_FULL_RE = re.compile(r"\bulic(?:a|y|e|ę|o|om|ami|ach)\b")
+    _ABBREV_UL_SHORT_RE = re.compile(r"\bul\.(?=\s|$)")
+    _ABBREV_NR_FULL_RE = re.compile(r"\bnumer(?:u|owi|em|ze|y|ów|om|ami|ach)?\b")
+    _ABBREV_NR_SHORT_RE = re.compile(r"\bnr\.(?=\s|$)")
+    _ABBREV_DR_FULL_RE = re.compile(r"\bdoktor(?:a|owi|em|ze|zy|ów|om|ami|ach)?\b")
+    _ABBREV_DR_SHORT_RE = re.compile(r"\bdr\.(?=\s|$)")
+    _ABBREV_PROF_FULL_RE = re.compile(r"\bprofesor(?:a|owi|em|ze|owie|ów|om|ami|ach)?\b")
+    _ABBREV_PROF_SHORT_RE = re.compile(r"\bprof\.(?=\s|$)")
+    _ABBREV_OK_RE = re.compile(
+        r"\bok\.\s*(?=\d|\b(?:godz|południ|poludni|północ|polnoc|st|lut|mar|kwi|maj|cze|lip|sie|wrz|paź|paz|lis|gru|jed|dw|trz|czt|pię|pie|sze|sie|osi|dzi|sto|tys|mil|bil|pół|pol)\w*)"
+    )
 
     def __init__(self, date_format: str = "{day:02d}.{month:02d}.{year}", **kwargs: object) -> None:
         """
@@ -85,25 +87,19 @@ class PolishTextNormalizer:
         fmt = self.date_format
         has_brace = "{" in fmt and "}" in fmt
         has_percent = "%" in fmt
-        # prefer explicit brace-format; if both present try brace first
+
         if has_brace:
             try:
                 return fmt.format(day=day, month=month, year=year)
             except Exception as exc:
                 logger.debug("brace date_format failed for %r: %s", fmt, exc)
-                if not has_percent:
-                    return f"{day:02d}.{month:02d}.{year}"
+
         if has_percent:
             try:
                 return datetime.datetime(year, month, day).strftime(fmt)
             except Exception as exc:
                 logger.debug("strftime date_format failed for %r: %s", fmt, exc)
-        # fallback: brace format if not tried
-        if not has_brace:
-            try:
-                return fmt.format(day=day, month=month, year=year)
-            except Exception as exc:
-                logger.debug("fallback brace format failed for %r: %s", fmt, exc)
+
         return f"{day:02d}.{month:02d}.{year}"
 
     def _month_number(self, word: str) -> str | None:

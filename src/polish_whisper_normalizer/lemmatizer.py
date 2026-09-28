@@ -76,6 +76,9 @@ class PolishLemmatizer:
                 results.append((lemma.split(":")[0], morph.split(":")[0]))
             except Exception:  # pragma: no cover – malformed entry
                 continue
+        if len(self._cache) > 20000:
+            for k in list(self._cache.keys())[:10000]:
+                del self._cache[k]
         self._cache[word] = results
         return results
 
@@ -100,5 +103,8 @@ class PolishLemmatizer:
                 surface, lem, tag = entry[0], entry[1], entry[2]  # type: ignore[misc]
                 if isinstance(surface, str) and isinstance(lem, str) and isinstance(tag, str):
                     out.append((surface, lem, tag))
+        if len(self._gen_cache) > 5000:
+            for k in list(self._gen_cache.keys())[:2500]:
+                del self._gen_cache[k]
         self._gen_cache[lemma] = out
         return out

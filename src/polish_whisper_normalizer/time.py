@@ -242,9 +242,15 @@ class PolishTimeNormalizer:
         self._re_polnoc = re.compile(r"\b(?:" + polnoc_alt + r")\b")
         self._re_poludnie = re.compile(r"\b(?:" + poludnie_alt + r")\b")
         # geographic protection: preposition + północ/południe (any declined form)
-        geo_preps = r"(?:na|z|od|do|w|ku|kierunek|strona|część|czesc|północno|polnocno|południowo|poludniowo|pod)"
-        self._re_geo_polnoc = re.compile(r"\b" + geo_preps + r"\s+(?:" + polnoc_alt + r")\b")
-        self._re_geo_poludnie = re.compile(r"\b" + geo_preps + r"\s+(?:" + poludnie_alt + r")\b")
+        # 'w południe' is temporal (at 12:00), never geographic in Polish (geographic is 'na południu'/'na południe')
+        geo_preps_polnoc = r"(?:na|z|od|do|w|ku|kierunek|strona|część|czesc|północno|polnocno|pod)"
+        geo_preps_poludnie = (
+            r"(?:na|z|od|do|ku|kierunek|strona|część|czesc|południowo|poludniowo|pod)"
+        )
+        self._re_geo_polnoc = re.compile(r"\b" + geo_preps_polnoc + r"\s+(?:" + polnoc_alt + r")\b")
+        self._re_geo_poludnie = re.compile(
+            r"\b" + geo_preps_poludnie + r"\s+(?:" + poludnie_alt + r")\b"
+        )
         # broader geographic: "na północy", "z północy", "od północy" etc already covered,
         # but also "północny" adjectives should stay words – no conversion via midnight regex (word boundary)
 
@@ -452,7 +458,7 @@ class PolishTimeNormalizer:
         s = self._re_geo_poludnie.sub(_protect_geo, s)
         # fallback legacy pattern (covers simple "na północ" if Morfeusz forms miss)
         s = re.sub(
-            r"\b(na|z|od|do|w|ku|kierunek|strona|część|czesc|północno|polnocno|południowo|poludniowo)\s+(północ|polnoc|południe|poludnie)\b",
+            r"\b(na|z|od|do|ku|kierunek|strona|część|czesc|północno|polnocno|południowo|poludniowo)\s+(północ|polnoc|południe|poludnie)\b",
             _protect_geo,
             s,
         )
@@ -537,26 +543,32 @@ class PolishTimeNormalizer:
         hour, minute = int(m.group(1)), int(m.group(2))
         if hour > 24 or minute > 59:
             return m.group(0)
+        # Hour 0 (0.05, 0.25, 0.50, etc.) is NEVER a bare dot clock time in Polish.
+        # Clock time for 00:00/0:00 requires context ("godzina 0.00", "o 0.00").
+        if hour == 0:
+            return m.group(0)
         # Preserve day.month dates: DD.MM with MM 01-12 stays dotted
         # (e.g. 21.05 May 21, 05.05, 01.01). Times like 18.30 (MM 30)
         # cannot be dates and convert to 18:30.
         if 1 <= hour <= 31 and 1 <= minute <= 12:
             return m.group(0)
-        # Preserve decimals like 3.14: require round minutes (M%5==0)
-        # or PM hour (H>=13). 18.30/8.15/20.45/18.00 convert, 3.14 stays.
-        if minute % 5 != 0 and hour < 13:
-            return m.group(0)
-        # Preserve currency/percent amounts ("1.50 $", "$1.50", "20.15%"):
-        # check surrounding text for currency symbols/words or %.
+
+        # Preserve units of measurement, quantities, and currencies
         full = m.string
         start, end = m.start(), m.end()
-        after = full[end : end + 12].lower()
-        before = full[max(0, start - 12) : start].lower()
+        after = full[end : end + 15].lower()
+        before = full[max(0, start - 15) : start].lower()
         after_stripped = after.lstrip()
-        # after: "$", "€", "£", "¢", "%", "zł", "gr", "euro", "dolar", …
+        before_stripped = before.rstrip()
+
+        # Check for currency or percent symbols
         if after_stripped[:1] in {"$", "€", "£", "¢", "%"}:
             return m.group(0)
-        for cur in (
+        if before_stripped[-1:] in {"$", "€", "£", "¢"}:
+            return m.group(0)
+
+        # Check for currency and measurement units following the number
+        units = (
             "zł",
             "gr",
             "euro",
@@ -566,16 +578,67 @@ class PolishTimeNormalizer:
             "cent",
             "funt",
             "gbp",
-            "procent",
             "pln",
             "złoty",
+            "złotych",
+            "złote",
+            "złotego",
             "grosz",
-        ):
-            if after_stripped.startswith(cur):
+            "groszy",
+            "grosze",
+            "grosza",
+            "procent",
+            "proc",
+            "kg",
+            "g",
+            "mg",
+            "dag",
+            "t",
+            "tona",
+            "tony",
+            "ton",
+            "m",
+            "km",
+            "cm",
+            "mm",
+            "metr",
+            "metra",
+            "metry",
+            "metrów",
+            "l",
+            "ml",
+            "litr",
+            "litra",
+            "litry",
+            "litrów",
+            "s",
+            "sek",
+            "sekund",
+            "sekundy",
+            "sekunda",
+            "stopni",
+            "stopnie",
+            "stopnia",
+            "punkt",
+            "punkty",
+            "punktów",
+            "pkt",
+        )
+        for u in units:
+            if after_stripped.startswith(u):
+                rest = after_stripped[len(u) :]
+                if not rest or not rest[0].isalpha():
+                    return m.group(0)
+
+        # Bare times require round minutes (M % 5 == 0) and daytime/evening hour (H >= 6)
+        # unless preceded by explicit time prepositions (o, od, do, około, koło)
+        has_time_prep = bool(re.search(r"\b(?:o|od|do|około|okolo|koło|kolo)\s*$", before_stripped))
+        if not has_time_prep:
+            if hour < 6:
                 return m.group(0)
-        before_stripped = before.rstrip()
-        if before_stripped[-1:] in {"$", "€", "£", "¢"}:
-            return m.group(0)
+            if minute % 5 != 0:
+                return m.group(0)
+
         return f"{hour}:{minute:02d}"
 
     def _godzina_digits_repl(self, m: re.Match[str]) -> str:

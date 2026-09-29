@@ -9,9 +9,126 @@ import re
 from .basic import remove_symbols
 from .numbers import PolishNumberNormalizer
 from .time import PolishTimeNormalizer
-from .utils import normalize_vulgar_fractions
+from .utils import normalize_vulgar_fractions, strip_diacritics
 
 logger = logging.getLogger(__name__)
+
+
+# strict Roman numeral validation (1-3999) + conversion (issue 11)
+_ROMAN_VALID_RE = re.compile(r"^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$")
+_ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+
+
+def _roman_to_int(tok: str) -> int | None:
+    """Return the value of a Roman numeral token, or None if invalid."""
+    if not tok or _ROMAN_VALID_RE.match(tok) is None:
+        return None
+    total = 0
+    prev = 0
+    for ch in reversed(tok):
+        val = _ROMAN_VALUES[ch]
+        if val < prev:
+            total -= val
+        else:
+            total += val
+            prev = val
+    return total if 1 <= total <= 3999 else None
+
+
+def _roman_repl(m: re.Match[str]) -> str:
+    val = _roman_to_int(m.group(1))
+    return str(val) if val is not None else m.group(0)
+
+
+# combining stems for glued percent adjectives ("dwudziestoprocentowy" -> 20%)
+# (issue 14); ASCII variants derived for diacritic-less ASR
+_PERCENT_STEMS: dict[str, int] = {
+    "jedno": 1,
+    "dwu": 2,
+    "trzy": 3,
+    "cztero": 4,
+    "pięcio": 5,
+    "sześcio": 6,
+    "siedmio": 7,
+    "ośmio": 8,
+    "dziewięcio": 9,
+    "dziesięcio": 10,
+    "jedenasto": 11,
+    "dwunasto": 12,
+    "trzynasto": 13,
+    "czternasto": 14,
+    "piętnasto": 15,
+    "szesnasto": 16,
+    "siedemnasto": 17,
+    "osiemnasto": 18,
+    "dziewiętnasto": 19,
+    "dwudziesto": 20,
+    "trzydziesto": 30,
+    "czterdziesto": 40,
+    "pięćdziesięcio": 50,
+    "sześćdziesięcio": 60,
+    "siedemdziesięcio": 70,
+    "osiemdziesięcio": 80,
+    "dziewięćdziesięcio": 90,
+    "stu": 100,
+    "dwustu": 200,
+}
+_PERCENT_TENS_STEMS: tuple[tuple[str, int], ...] = (
+    ("dziewięćdziesięcio", 90),
+    ("siedemdziesięcio", 70),
+    ("sześćdziesięcio", 60),
+    ("pięćdziesięcio", 50),
+    ("osiemdziesięcio", 80),
+    ("czterdziesto", 40),
+    ("trzydziesto", 30),
+    ("dwudziesto", 20),
+)
+_PERCENT_UNIT_STEMS: dict[str, int] = {
+    "jedno": 1,
+    "dwu": 2,
+    "trzy": 3,
+    "cztero": 4,
+    "pięcio": 5,
+    "sześcio": 6,
+    "siedmio": 7,
+    "ośmio": 8,
+    "dziewięcio": 9,
+}
+
+
+def _with_ascii_int(mapping: dict[str, int]) -> dict[str, int]:
+    expanded: dict[str, int] = dict(mapping)
+    for key, value in mapping.items():
+        stripped = strip_diacritics(key)
+        if stripped != key and stripped not in expanded:
+            expanded[stripped] = value
+    return expanded
+
+
+_PERCENT_STEMS_ALL = _with_ascii_int(_PERCENT_STEMS)
+_PERCENT_TENS_ALL = tuple(
+    (stripped, val)
+    for stem, val in _PERCENT_TENS_STEMS
+    for stripped in {stem, strip_diacritics(stem)}
+)
+_PERCENT_UNITS_ALL = _with_ascii_int(_PERCENT_UNIT_STEMS)
+
+
+def _percent_glued_repl(m: re.Match[str]) -> str:
+    """Convert a glued percent adjective stem to digits + % (issue 14)."""
+    stem = m.group(1)
+    val = _PERCENT_STEMS_ALL.get(stem)
+    if val is None:
+        # tens + unit compounds ("dwudziestotrzy" -> 23)
+        for tstem, tval in _PERCENT_TENS_ALL:
+            if stem.startswith(tstem):
+                uval = _PERCENT_UNITS_ALL.get(stem[len(tstem) :])
+                if uval is not None:
+                    val = tval + uval
+                    break
+    if val is None:
+        return m.group(0)
+    return f"{val}%"
 
 
 class PolishTextNormalizer:
@@ -20,6 +137,34 @@ class PolishTextNormalizer:
     # characters are dropped (via remove_symbols below), enclosed words kept.
     _WS_RE = re.compile(r"\s+")
     _IGNORE_RE = re.compile(r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b")
+    # invisible formatting chars (zero-width, bidi) are dropped (10)
+    _FORMAT_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+")
+    # Roman numerals: all-uppercase + valid + len>=2, followed by a word
+    # ("XI wiek" -> "11"); guards "i" (and), "Ci", "mi", lowercase (11)
+    _ROMAN_RE = re.compile(r"\b([IVXLCDM]{2,})(?=\s+[a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ]{2,})")
+    # Polish dot thousands separator ("60.000" -> "60000"); runs BEFORE
+    # decimal comma conversion so "60,000" (decimal 60) is untouched (12)
+    _THOUSANDS_DOT_RE = re.compile(r"(\d)\.(\d{3})(?!\d)")
+    # hyphenated ordinal suffix after digits ("70-te" -> "70"); hyphenated
+    # only – spaced "te" is a real word (17)
+    _DIGIT_ORD_SUFFIX_RE = re.compile(
+        r"\b(\d+)-(?:te|ta|to|ty|tą|tego|tej|tym|tych|tymi|szy|sza|sze)\b"
+    )
+    # letter-hyphen-digit is a hyphen, not a minus ("omega-3" -> "omega 3",
+    # like digit-word "70-latek" -> "70 latek"); leading "-10" kept (17)
+    _LETTER_HYPHEN_DIGIT_RE = re.compile(r"(?<=[a-ząćęłńóśźża-z])-(?=\d)")
+    # unit full forms -> short, like bug 8 ul/nr/dr ("kilometrów" -> "km") (14)
+    _UNIT_KM_RE = re.compile(r"\bkilometr\w*\b")
+    # percent adjectives -> percent ("20-procentowy" -> "20%") (14)
+    _PERCENT_ADJ_DIGIT_RE = re.compile(r"\b(\d+)\s*-?\s*procentow\w*\b")
+    _PERCENT_GLUED_RE = re.compile(r"\b([a-ząćęłńóśźż]+?)procentow\w*\b")
+    _PERCENT_ADJ_WORD_RE = re.compile(r"\bprocentow\w*\b")
+    # "pół żartem/pół serio" are idioms, not 0.5 (15)
+    _POL_IDIOM_RE = re.compile(r"\b(pół|pol)\s+(żartem|serio|zartem)\b")
+    # magnitude abbreviations, like bug 8 ("50 tys." -> "50 tysięcy") (13)
+    _ABBREV_TYS_RE = re.compile(r"\btys\.?(?=\s|$)")
+    _ABBREV_MLN_RE = re.compile(r"\bmln\.?(?=\s|$)")
+    _ABBREV_MLD_RE = re.compile(r"\bmld\.?(?=\s|$)")
     _SENTENCE_PERIOD_RE = re.compile(r"(?<![\d.])\.(?!\.)([^0-9]|$)")
     _ELLIPSIS_RE = re.compile(r"(?:\s*\.){2,}\s*|\s*…\s*")
     _NUMBER_SEPARATOR_RE = re.compile(r"[,;!?—–]")
@@ -130,8 +275,14 @@ class PolishTextNormalizer:
     def __call__(self, s: str) -> str:
         if not isinstance(s, str):
             raise TypeError(f"Expected str, got {type(s).__name__}")
+        # Roman numerals before lowercasing (case guard: only ALL-UPPERCASE
+        # "XI wiek" -> "11 wiek"; "i", "Ci", "mi", lowercase stay) (11)
+        s = self._ROMAN_RE.sub(_roman_repl, s)
         s = normalize_vulgar_fractions(s.lower())
+        s = self._FORMAT_RE.sub("", s)  # invisible formatting chars (10)
         s = re.sub(r"\b(pół|pol|ćwierć|cwierc)-\s*([a-ząćęłńóśźż]+)\b", r"\1\2", s)
+        # spaced "pół żartem/pół serio" are idioms, not 0.5 (15)
+        s = self._POL_IDIOM_RE.sub(r"\1\2", s)
 
         # Polish abbreviations <-> spoken forms (bug 8): normalize both sides
         # to the same token ("tak zwany" <-> "tzw" -> "tzw", "np." -> "np",
@@ -157,6 +308,22 @@ class PolishTextNormalizer:
         s = self._ABBREV_PROF_FULL_RE.sub("prof", s)
         s = self._ABBREV_PROF_SHORT_RE.sub("prof", s)
         s = self._ABBREV_OK_RE.sub("około", s)
+        # magnitude abbreviations, like bug 8 (13)
+        s = self._ABBREV_TYS_RE.sub("tysięcy", s)
+        s = self._ABBREV_MLN_RE.sub("milionów", s)
+        s = self._ABBREV_MLD_RE.sub("miliardów", s)
+        # unit full forms -> short, like bug 8 ul/nr/dr (14)
+        s = self._UNIT_KM_RE.sub("km", s)
+        # percent adjectives -> percent (14): digit ("20-procentowy" -> "20%"),
+        # glued ("dwudziestoprocentowy" -> "20%"), spaced word
+        # ("dwadzieścia procentowy" -> "dwadzieścia procent" -> "20%")
+        s = self._PERCENT_ADJ_DIGIT_RE.sub(r"\1%", s)
+        s = self._PERCENT_GLUED_RE.sub(_percent_glued_repl, s)
+        s = self._PERCENT_ADJ_WORD_RE.sub("procent", s)
+        # hyphenated ordinal suffix after digits ("70-te" -> "70", hyphenated
+        # only) + letter-hyphen-digit split ("omega-3" -> "omega 3") (17)
+        s = self._DIGIT_ORD_SUFFIX_RE.sub(r"\1", s)
+        s = self._LETTER_HYPHEN_DIGIT_RE.sub(" ", s)
 
         s = self._IGNORE_RE.sub("", s)
 
@@ -171,6 +338,14 @@ class PolishTextNormalizer:
         s = self._ELLIPSIS_RE.sub(" . ", s)
 
         s = self.standardize_time(s)
+
+        # Polish dot thousands separator ("60.000" -> "60000", "1.000.000" ->
+        # "1000000"); loop for stacked groups. BEFORE decimal comma so
+        # "60,000" (Polish decimal 60) is untouched (12)
+        _prev = None
+        while _prev != s:
+            _prev = s
+            s = self._THOUSANDS_DOT_RE.sub(r"\1\2", s)
 
         s = self._DECIMAL_COMMA_RE.sub(r"\1.\2", s)  # Polish decimal comma -> point
         # other punctuation separates numerals ("10, 500" -> "10 500") instead

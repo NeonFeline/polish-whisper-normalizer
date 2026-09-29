@@ -4,6 +4,12 @@
 
 - Brackets `()`, `[]`, `<>`, `{}` are punctuation: drop the characters, keep enclosed words (`(cicho) start → cicho start`); previously `(…)`, `[…]`, `<…>` content was deleted. `BasicTextNormalizer` behaves the same.
 - Docs: sync `README.md` / `docs/index.md` pipeline, bracket behavior, test count (870+), fix PL ordinal example (`pierwszego → 1`).
+- Strip invisible formatting chars (U+200B-200F, U+202A-202E, U+2060-2064, U+2066-2069, U+FEFF) in all normalizers; formatting-only hypotheses normalize to `''` (10).
+- Convert guarded Roman numerals (`XI wiek → 11 wiek`); all-uppercase + valid + followed by a word, so `i`/`Ci`/`mi`/lowercase stay (11).
+- Polish dot thousands separator (`60.000 → 60000`, `1.000.000 → 1000000`); decimal comma untouched (`60,000 → 60`) (12).
+- Reconcile `tys./mln/mld` (`50 tys. → 50000`), `kilometr* → km`, percent adjectives (`20-procentowy`, `dwudziestoprocentowy → 20%`) (13, 14).
+- Keep `pół żartem/pół serio` idioms as words; partitive `jedną/jeden z …` stays a word while `jedną unię → 1 unię` (15, 16).
+- Consistent hyphens (`omega-3 → omega 3`, `70-te → 70`, `70-latek → 70 latek`); leading `-10` kept (17).
 
 ## 0.1.4 – 2026-09-07
 

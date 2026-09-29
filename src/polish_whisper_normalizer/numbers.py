@@ -55,6 +55,8 @@ class PolishNumberNormalizer:
 
     # pre-compiled patterns (avoid recompiling per token)
     _POLISH_WORD_RE = re.compile(r"[a-ząćęłńóśźż]+")
+    # invisible formatting chars (zero-width, bidi) are dropped (10)
+    _FORMAT_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+")
     _NUMERIC_RE = re.compile(r"^\d+(?:\.\d+)?$")
     _NUMERIC_PREFIX_RE = re.compile(r"^\d")
     _DIGIT_RE = re.compile(r"^\d+(?:\.\d+)?$")
@@ -570,17 +572,22 @@ class PolishNumberNormalizer:
                         continue
                 # Pronominal "jeden" (not numeral): "wszystko mi było jedno",
                 # "chciałem tylko jednego" stays a word (bug 7, like
-                # "Maja"/"na północ" guards). Preserve original inflection
-                # ("jedną" stays "jedną", not lemmatized to "jeden").
-                if current in {"jeden", "jedna", "jedno"} and prev in {
-                    "było",
-                    "bylo",
-                    "była",
-                    "byla",
-                    "jest",
-                    "tylko",
-                    "mi",
-                }:
+                # "Maja"/"na północ" guards). Partitive "jeden/jedną/jedno z …"
+                # ("one of them") also stays a word (16). Preserve original
+                # inflection ("jedną" stays "jedną", not lemmatized to "jeden").
+                if current in {"jeden", "jedna", "jedno"} and (
+                    prev
+                    in {
+                        "było",
+                        "bylo",
+                        "była",
+                        "byla",
+                        "jest",
+                        "tylko",
+                        "mi",
+                    }
+                    or next == "z"
+                ):
                     if value is not None:
                         yield output(value)  # type: ignore[arg-type]
                     yield output(orig_current)  # type: ignore[arg-type]
@@ -803,6 +810,7 @@ class PolishNumberNormalizer:
             yield output(value)
 
     def preprocess(self, s: str) -> str:
+        s = self._FORMAT_RE.sub("", s)  # invisible formatting chars (10)
         s = normalize_vulgar_fractions(s)
         # join hyphenated compound words with prefixes "pół-", "ćwierć-":
         # "pół-finał" -> "półfinał", "ćwierć-finał" -> "ćwierćfinał", "pół-żartem" -> "półżartem"

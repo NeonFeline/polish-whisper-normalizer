@@ -14,6 +14,9 @@ import uuid
 
 from .utils import strip_diacritics, with_ascii_variants
 
+# invisible formatting chars (zero-width, bidi) are dropped (10)
+_FORMAT_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+")
+
 
 class PolishTimeNormalizer:
     """
@@ -456,6 +459,7 @@ class PolishTimeNormalizer:
     def __call__(self, s: str) -> str:
         if not isinstance(s, str):
             raise TypeError(f"Expected str, got {type(s).__name__}")
+        s = _FORMAT_RE.sub("", s)  # invisible formatting chars (10)
         s = self._re_godzina_digits.sub(self._godzina_digits_repl, s)
         s = self._re_o_godzinie_digits.sub(self._o_godzinie_digits_repl, s)
         s = self._re_godzina_digit_hour.sub(self._godzina_digit_hour_repl, s)

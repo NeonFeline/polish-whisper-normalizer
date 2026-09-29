@@ -32,8 +32,9 @@
 | **Ordinal multipliers** | `tysiąc dziewięćsetny` | `1900` |
 | **Dates** | `5 maja` → `05.05` · `piątego maja` → `05.05` · `piątego maja 2026` → `05.05.2026` · `piątego maja roku dwa tysiące dwudziestego szóstego` → `05.05.2026` | `DD.MM` / `DD.MM.YYYY` zero-padded, conditional (`maja` alone stays `maja`, avoids `Maja`→`5`) |
 | **Geographic guard** | `na północ` stays, `jest północ` → `jest 0:00` | no false `0:00` for north |
+| **Brackets** | `(cicho) start`, `[muzyka] słowo`, `<tag>`, `{test}` | `cicho start`, `muzyka słowo` (bracket chars dropped, words kept) |
 
-**Pipeline** (`text.py`): `lower → brackets/parens/ignore → r.→roku → sentence periods/ellipsis → time (Morfeusz) → decimal ,→. → numeral boundaries → remove_symbols(keep=".:/%$€£¢+-") → numbers (Morfeusz) → months (conditional, Morfeusz) → dates → ordinal-dot cleanup`. Configurable via `PolishTextNormalizer(date_format=...)`. Diacritic-less ASR (`czterdziesci`, `piec`, `wpol`) handled via `utils` + `Morfeusz.generate`.
+**Pipeline** (`text.py`): `lower → ignore (fillers eee/hmm/…) → r.→roku → sentence periods/ellipsis → time (Morfeusz) → decimal ,→. → numeral boundaries → remove_symbols(keep=".:/%$€£¢+-"; brackets ()[]<> {} → space, words kept) → numbers (Morfeusz) → months (conditional, Morfeusz) → dates → ordinal-dot cleanup`. Configurable via `PolishTextNormalizer(date_format=...)`. Diacritic-less ASR (`czterdziesci`, `piec`, `wpol`) handled via `utils` + `Morfeusz.generate`.
 
 ### Installation
 
@@ -164,7 +165,7 @@ Full API: **[neonfeline.github.io/polish-whisper-normalizer](https://neonfeline.
 
 ```bash
 uv sync --group dev
-uv run pytest -q          # 600+ tests
+uv run pytest -q          # 870+ tests
 uv run mypy src           # strict, py.typed
 uv run ruff check src tests && uv run ruff format --check src tests
 uv build
@@ -188,12 +189,13 @@ MIT — see `LICENSE` (inherits Whisper MIT for `basic.py`).
 | Obszar | Przykład | Po normalizacji |
 |---|---|---|
 | **Znaki diakrytyczne** | `Żółć!` | `żółć` (zachowane) |
-| **Liczebniki** | `sto dwadzieścia trzy`, `pierwszego` | `123`, `1.` |
+| **Liczebniki** | `sto dwadzieścia trzy`, `pierwszego` | `123`, `1` |
+| **Nawiasy** | `(cicho) start`, `[muzyka] słowo` | `cicho start`, `muzyka słowo` (znaki usunięte, słowa zachowane) |
 | **Czas** | `piąta trzydzieści`, `o piątej`, `od piątej do szóstej` | `5:30`, `o 5:00`, `od 5:00 do 6:00` |
 | **Daty** | `5 maja` → `05.05` · `piątego maja 2026` → `05.05.2026` | `DD.MM` / `DD.MM.RRRR`, warunkowo (`maja` samo → `maja`) |
 | **Waluta / procent / ułamki** | `pięć złotówek`, `procentów`, `1/3`, `pół litra` | `5 zł`, `5%`, `1/3`, `0.5 litra` |
 
-**Potok:** `lower → czas → liczby → miesiące (warunkowo) → daty`.
+**Potok:** `lower → ignore → czas → liczby → miesiące (warunkowo) → daty` (nawiasy `()[]<> {}` → spacja, słowa zachowane).
 
 ### Instalacja i użycie (PL)
 

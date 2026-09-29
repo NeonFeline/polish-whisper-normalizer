@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Brackets `()`, `[]`, `<>`, `{}` are punctuation: drop the characters, keep enclosed words (`(cicho) start → cicho start`); previously `(…)`, `[…]`, `<…>` content was deleted. `BasicTextNormalizer` behaves the same.
+- Docs: sync `README.md` / `docs/index.md` pipeline, bracket behavior, test count (870+), fix PL ordinal example (`pierwszego → 1`).
+
 ## 0.1.4 – 2026-09-07
 
 - Fix publish workflow: `tomllib` is 3.11+ only, use regex parse so `3.10` runner publishes correctly

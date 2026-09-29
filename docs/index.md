@@ -16,7 +16,7 @@ n("trzysta czterdziesci osiem")
 
 ```bash
 uv sync                 # install + morfeusz2
-uv run pytest -q        # 500+ tests
+uv run pytest -q        # 870+ tests
 uv run mkdocs serve     # docs at http://127.0.0.1:8000
 ```
 
@@ -28,12 +28,13 @@ uv run mkdocs serve     # docs at http://127.0.0.1:8000
 - **Currency/percent/fractions/half** – `5 zł`, `5%`, `1/3`, `0.5 litra` (fraction via ordinal lemmas)
 - **Dates** – `5 maja → 05.05`, `piątego maja 2026 → 05.05.2026`, conditional `maja` vs `Maja`
 - **Geographic guard** – `na północ` stays, `jest północ → 0:00`
+- **Brackets** – `()[]<> {}` are punctuation: chars dropped, words kept (`(cicho) start → cicho start`)
 
 See [API](api.md) for details.
 
 ## Pipeline
 
-`lower → brackets/ignore → r.→roku → sentence periods/ellipsis → time → decimal ,→. → numeral boundaries → remove_symbols → numbers → months (conditional) → dates → ordinal-dot cleanup` (`PolishTextNormalizer` in `text.py`)
+`lower → ignore (fillers) → r.→roku → sentence periods/ellipsis → time → decimal ,→. → numeral boundaries → remove_symbols (brackets ()[]<> {} → space, words kept) → numbers → months (conditional) → dates → ordinal-dot cleanup` (`PolishTextNormalizer` in `text.py`)
 
 ## Architecture
 

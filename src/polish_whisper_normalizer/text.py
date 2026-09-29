@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 class PolishTextNormalizer:
     # pre-compiled patterns shared across instances
-    _BRACKETS_RE = re.compile(r"<[^>]*>|\[[^\]]*\]")
-    _PAREN_RE = re.compile(r"\([^)]*\)")
+    # NOTE: brackets (), [], <>, {} are punctuation – only the bracket
+    # characters are dropped (via remove_symbols below), enclosed words kept.
     _WS_RE = re.compile(r"\s+")
     _IGNORE_RE = re.compile(r"\b(?:eee+|yyy+|hmm+|mhm+|mmm+|uh+|um+)\b")
     _SENTENCE_PERIOD_RE = re.compile(r"(?<![\d.])\.(?!\.)([^0-9]|$)")
@@ -158,8 +158,6 @@ class PolishTextNormalizer:
         s = self._ABBREV_PROF_SHORT_RE.sub("prof", s)
         s = self._ABBREV_OK_RE.sub("około", s)
 
-        s = self._BRACKETS_RE.sub("", s)  # remove words between brackets
-        s = self._PAREN_RE.sub("", s)  # remove words between parenthesis
         s = self._IGNORE_RE.sub("", s)
 
         # expand the year abbreviation "r." / "r" to "roku" (w r. 1860 -> w roku 1860)

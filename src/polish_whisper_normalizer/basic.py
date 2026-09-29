@@ -66,8 +66,8 @@ def remove_symbols(s: str, keep: str = "") -> str:
 
 class BasicTextNormalizer:
     # pre-compiled for speed and clarity (avoid character-class confusion)
-    _BRACKETS_RE = re.compile(r"<[^>]*>|\[[^\]]*\]")
-    _PAREN_RE = re.compile(r"\([^)]*\)")
+    # NOTE: brackets (), [], <>, {} are punctuation – only the bracket
+    # characters are dropped (via clean/remove_symbols below), enclosed words kept.
     _WS_RE = re.compile(r"\s+")
 
     def __init__(self, remove_diacritics: bool = False, split_letters: bool = False) -> None:
@@ -80,8 +80,6 @@ class BasicTextNormalizer:
         if not isinstance(s, str):
             raise TypeError(f"Expected str, got {type(s).__name__}")
         s = s.lower()
-        s = self._BRACKETS_RE.sub("", s)  # remove words between brackets
-        s = self._PAREN_RE.sub("", s)  # remove words between parenthesis
         s = self.clean(s)
 
         if self.split_letters:

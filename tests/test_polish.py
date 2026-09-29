@@ -123,14 +123,62 @@ def test_diacritics_preserved(normalize, text, expected):
     "text, expected",
     [
         ("Dzień Dobry!", "dzień dobry"),
-        ("(cicho) start", "start"),
-        ("[muzyka] słowo", "słowo"),
+        ("(cicho) start", "cicho start"),
+        ("[muzyka] słowo", "muzyka słowo"),
         ("eee coś", "coś"),
         ("hmm tak", "tak"),
     ],
 )
 def test_punctuation_and_fillers(normalize, text, expected):
     assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # brackets are punctuation: drop the characters, keep enclosed words
+        ("(cicho) start", "cicho start"),
+        ("[muzyka] słowo", "muzyka słowo"),
+        ("<tag> słowo", "tag słowo"),
+        ("{test} słowo", "test słowo"),
+        ("(a) [b] <c> {d}", "a b c d"),
+        ("tekst (mówiony) dalej", "tekst mówiony dalej"),
+        ("tekst [mówiony] dalej", "tekst mówiony dalej"),
+        ("tekst <mówiony> dalej", "tekst mówiony dalej"),
+        ("tekst {mówiony} dalej", "tekst mówiony dalej"),
+        # unmatched brackets keep content
+        ("unmatched ( bracket", "unmatched bracket"),
+        ("unmatched [ bracket", "unmatched bracket"),
+        ("unmatched < bracket", "unmatched bracket"),
+        ("unmatched { bracket", "unmatched bracket"),
+        ("unmatched ) bracket", "unmatched bracket"),
+        # empty brackets collapse to nothing
+        ("słowo () słowo", "słowo słowo"),
+        ("słowo [] słowo", "słowo słowo"),
+        # nested brackets keep inner words
+        ("a [[wewnątrz]] b", "a wewnątrz b"),
+        ("a ((nawias)) b", "a nawias b"),
+        # numbers inside brackets still normalize
+        ("(pięć)", "5"),
+        ("[dwadzieścia jeden]", "21"),
+    ],
+)
+def test_brackets_keep_content(normalize, text, expected):
+    assert normalize(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("(cicho) start", "cicho start"),
+        ("[muzyka] słowo", "muzyka słowo"),
+        ("<tag> słowo", "tag słowo"),
+        ("{test} słowo", "test słowo"),
+        ("(a) [b] <c> {d}", "a b c d"),
+    ],
+)
+def test_basic_brackets_keep_content(text, expected):
+    assert BasicTextNormalizer()(text) == expected
 
 
 def test_full_sentence(normalize):

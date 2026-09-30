@@ -220,6 +220,33 @@ def test_jedna_partitive(normalize: PolishTextNormalizer, text: str, expected: s
 
 
 # ---------------------------------------------------------------------------
+# Perf prefilter: fractions still convert, non-fractions skip parsing (LOW)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("jedna druga", "0.5"),
+        ("jednej trzeciej", "1/3"),
+        ("dwóch trzecich", "2/3"),
+        ("trzy czwarte", "3/4"),
+        ("dwie trzecie", "2/3"),
+        ("zero trzecich", "0/3"),
+        # guards still hold (no false fractions / ordinal compounds intact)
+        ("jeden drugi", "1 2"),
+        ("ani jeden ani drugi", "ani 1 ani 2"),
+        ("sto dwudziesty", "120"),
+        # plain sentences pass through untouched
+        ("kot ma kota", "kot ma kota"),
+        ("pięć zerowych", "5 zerowych"),
+    ],
+)
+def test_fractions_prefilter(normalize: PolishTextNormalizer, text: str, expected: str) -> None:
+    assert normalize(text) == expected
+
+
+# ---------------------------------------------------------------------------
 # 17. Hyphens are handled consistently (LOW)
 # ---------------------------------------------------------------------------
 

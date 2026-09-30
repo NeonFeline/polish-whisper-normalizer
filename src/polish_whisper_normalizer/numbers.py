@@ -27,6 +27,31 @@ from .utils import (
 logger = logging.getLogger(__name__)
 
 
+# masculine nominative singular ordinals (2-10) are never fraction
+# denominators in Polish ("jeden drugi" must not become 1/2). Shared by
+# _fraction_denominator and the denominator prefilter (perf) so the two
+# cannot drift apart.
+_MASC_NOM_SING_ORDINALS: frozenset[str] = frozenset(
+    {
+        "drugi",
+        "trzeci",
+        "czwarty",
+        "piąty",
+        "szósty",
+        "siódmy",
+        "ósmy",
+        "dziewiąty",
+        "dziesiąty",
+        "piaty",
+        "szosty",
+        "siodmy",
+        "osmy",
+        "dziewiaty",
+        "dziesiaty",
+    }
+)
+
+
 def _windowed_3(seq: list[str | None]) -> Iterator[tuple[str | None, str | None, str | None]]:
     """Lightweight windowed(3) to avoid more-itertools dependency."""
     for i in range(len(seq) - 2):
@@ -53,6 +78,9 @@ class PolishNumberNormalizer:
     _CACHE_LOCK = threading.Lock()
     _DECLINED_ASCII_CACHE: dict[str, str] | None = None
     _DECLINED_LOCK = threading.Lock()
+    # all possible fraction-denominator surfaces (perf prefilter, built once)
+    _DENOM_SURFACE_CACHE: frozenset[str] | None = None
+    _DENOM_LOCK = threading.Lock()
 
     # pre-compiled patterns (avoid recompiling per token)
     _POLISH_WORD_RE = re.compile(r"[a-ząćęłńóśźż]+")
@@ -352,6 +380,9 @@ class PolishNumberNormalizer:
             | _orig_month
         )
         self._declined_ascii_map = self._get_or_build_declined_map(_all_orig_bases, self.lemmatizer)
+        self._denom_surfaces = self._get_or_build_denom_surfaces(
+            self.ordinal_values, self.lemmatizer
+        )
 
     def _expand_ascii_variants(self) -> None:
         """Expand lexicons with ASCII-folded variants for diacritic-less ASR."""
@@ -438,6 +469,48 @@ class PolishNumberNormalizer:
             if cls._DECLINED_ASCII_CACHE is None:
                 cls._DECLINED_ASCII_CACHE = copy.deepcopy(declined)
         return declined
+
+    @classmethod
+    def _get_or_build_denom_surfaces(
+        cls, ordinal_values: dict[str, int], lemmatizer: PolishLemmatizer
+    ) -> frozenset[str]:
+        """Return cached set of possible fraction-denominator surfaces.
+
+        Built once via Morfeusz.generate over ordinal bases (value >= 2),
+        plus ASCII folds and the bare bases themselves (e.g. "setny",
+        "dwudziesty", ASCII "piaty"-style forms). Mirrors
+        _fraction_denominator exactly: masculine nominative singulars
+        (2-10) can never be denominators and are excluded.
+        """
+        if cls._DENOM_SURFACE_CACHE is not None:
+            return cls._DENOM_SURFACE_CACHE
+        surfaces: set[str] = set()
+        for base, value in ordinal_values.items():
+            if value < 2:
+                continue
+            # Bare masculine nominative singulars (2-10) are never
+            # denominators, but their declined forms may be (e.g. "piatego"
+            # via the ASCII fallback) – so generate everything, only the
+            # bare excluded forms stay out of the set.
+            if base not in _MASC_NOM_SING_ORDINALS:
+                surfaces.add(base)
+            if lemmatizer.morf is not None:
+                try:
+                    forms = lemmatizer.generate(base)
+                except Exception:
+                    logger.debug("generate failed for %r", base)
+                    continue
+                for surface, lemma, _tag in forms:
+                    if lemma.split(":")[0] != base:
+                        continue
+                    surfaces.add(surface)
+                    folded = strip_diacritics(surface)
+                    if folded != surface:
+                        surfaces.add(folded)
+        with cls._DENOM_LOCK:
+            if cls._DENOM_SURFACE_CACHE is None:
+                cls._DENOM_SURFACE_CACHE = frozenset(surfaces)
+        return cls._DENOM_SURFACE_CACHE
 
     def _canonicalize(self, word: str) -> str:
         """Map a declined number word to its base lemma, if it is one."""
@@ -953,23 +1026,7 @@ class PolishNumberNormalizer:
         # (e.g. "druga", "trzecia", "czwarta", "trzecie", "czwarte", "piątych", "setnych").
         # Masculine nominative singular forms ("drugi", "trzeci", "czwarty", "piąty")
         # are never fraction denominators in Polish and must not collide (e.g. "jeden drugi").
-        if word in {
-            "drugi",
-            "trzeci",
-            "czwarty",
-            "piąty",
-            "szósty",
-            "siódmy",
-            "ósmy",
-            "dziewiąty",
-            "dziesiąty",
-            "piaty",
-            "szosty",
-            "siodmy",
-            "osmy",
-            "dziewiaty",
-            "dziesiaty",
-        }:
+        if word in _MASC_NOM_SING_ORDINALS:
             return None
         for base, pos in self.lemmatizer.analyse(word):
             if pos == "adj" and base in self.ordinal_values:
@@ -1174,7 +1231,12 @@ class PolishNumberNormalizer:
         multi-word numerators like "dwadzieścia trzy setne" -> "23/100".
         Requires numerator < denominator to avoid colliding with ordinal
         compounds like "sto dwudziesty" -> 120 (not 100/20).
+
+        Perf: a fraction needs a denominator surface, so inputs without one
+        skip the per-position parsing (the common case).
         """
+        if len(words) < 2 or not any(w in self._denom_surfaces for w in words):
+            return list(words)
         result: list[str] = []
         i = 0
         n = len(words)

@@ -12,7 +12,7 @@ import re
 import threading
 import uuid
 
-from .utils import strip_diacritics, with_ascii_variants
+from .utils import contains_digit, strip_diacritics, with_ascii_variants
 
 # invisible formatting chars (zero-width, bidi) are dropped (10)
 _FORMAT_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+")
@@ -110,6 +110,16 @@ class PolishTimeNormalizer:
         self.hours_gen = with_ascii_variants(self.hours_gen)
         self.minutes = with_ascii_variants(self.minutes)
         self.minutes_ordinal = with_ascii_variants(self.minutes_ordinal)
+        # perf: word set for __call__ guards (a match always contains one of
+        # these, so absence lets us skip the big hour/minute alternations).
+        # First words only: patterns join multi-word keys ("dwudziestej
+        # pierwszej") with flexible \s+, so the full key is not a necessary
+        # literal but its first word is.
+        self._time_words: frozenset[str] = frozenset(
+            key.split()[0]
+            for mapping in (self.hours, self.hours_gen, self.minutes, self.minutes_ordinal)
+            for key in mapping
+        )
 
         hours_alt = self._alternation(self.hours)
         hours_gen_alt = self._alternation(self.hours_gen)
@@ -460,33 +470,54 @@ class PolishTimeNormalizer:
         if not isinstance(s, str):
             raise TypeError(f"Expected str, got {type(s).__name__}")
         s = _FORMAT_RE.sub("", s)  # invisible formatting chars (10)
-        s = self._re_godzina_digits.sub(self._godzina_digits_repl, s)
-        s = self._re_o_godzinie_digits.sub(self._o_godzinie_digits_repl, s)
-        s = self._re_godzina_digit_hour.sub(self._godzina_digit_hour_repl, s)
-        s = self._re_o_godzinie_digit_hour.sub(self._o_godzinie_digit_hour_repl, s)
-        s = self._re_bare_dot_time.sub(self._bare_dot_time_repl, s)
+        # perf: guards below are necessary conditions — skipping the scan
+        # never changes output; most time scans are no-ops on non-time input
+        has_digit = contains_digit(s)
+        has_time_word = any(w in s for w in self._time_words)
+        has_marker = (
+            "rano" in s
+            or "wieczorem" in s
+            or "nocy" in s
+            or "nocą" in s
+            or "noca" in s
+            or "ranem" in s
+            or "dzień" in s
+            or "dzien" in s
+        )
+        has_midnight_word = "północ" in s or "polnoc" in s or "południ" in s or "poludni" in s
+        if "godz" in s:
+            s = self._re_godzina_digits.sub(self._godzina_digits_repl, s)
+            s = self._re_o_godzinie_digits.sub(self._o_godzinie_digits_repl, s)
+            s = self._re_godzina_digit_hour.sub(self._godzina_digit_hour_repl, s)
+            s = self._re_o_godzinie_digit_hour.sub(self._o_godzinie_digit_hour_repl, s)
+        if "." in s and has_digit:
+            s = self._re_bare_dot_time.sub(self._bare_dot_time_repl, s)
         # "o godzinie" hour-alone before hour+minutes so compound hours
         # ("dwudziestej pierwszej" = 21) claim before short hour+minutes
         # ("dwudziestej" + "pierwszej" = 20:01); hour-alone lookahead blocks
         # both cardinal and ordinal minutes.
-        s = self._re_o_godzinie_hour.sub(self._o_godzinie_hour_repl, s)
-        s = self._re_o_godzinie_card.sub(self._o_godzinie_ord_repl, s)
-        s = self._re_o_godzinie_ord.sub(self._o_godzinie_ord_repl, s)
-        s = self._re_wpol_spaced.sub(
-            lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
-        )
-        s = self._re_wpol.sub(
-            lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
-        )
+        if "godzinie" in s:
+            s = self._re_o_godzinie_hour.sub(self._o_godzinie_hour_repl, s)
+            s = self._re_o_godzinie_card.sub(self._o_godzinie_ord_repl, s)
+            s = self._re_o_godzinie_ord.sub(self._o_godzinie_ord_repl, s)
+        if "do" in s and has_time_word:
+            s = self._re_wpol_spaced.sub(
+                lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
+            )
+            s = self._re_wpol.sub(
+                lambda m: f"{(self.hours_gen[self._norm_phrase(m.group(1))] - 1) % 24}:30", s
+            )
         # handle time-of-day markers: generic marker before narrow "rano" to capture all
         # digit markers first (most specific), then word markers
-        s = self._re_o_digit_marker.sub(self._o_digit_marker_repl, s)
-        s = self._re_digit_marker.sub(self._digit_marker_repl, s)
-        s = self._re_o_hour_marker.sub(self._o_hour_marker_repl, s)
-        s = self._re_hour_marker.sub(self._hour_marker_repl, s)
-        # legacy rano handlers (kept for compat, now redundant but harmless)
-        s = self._re_o_hour_rano.sub(self._o_hour_rano_repl, s)
-        s = self._re_hour_rano.sub(self._hour_rano_repl, s)
+        if has_digit and has_marker:
+            s = self._re_o_digit_marker.sub(self._o_digit_marker_repl, s)
+            s = self._re_digit_marker.sub(self._digit_marker_repl, s)
+        if has_marker:
+            s = self._re_o_hour_marker.sub(self._o_hour_marker_repl, s)
+            s = self._re_hour_marker.sub(self._hour_marker_repl, s)
+            # legacy rano handlers (kept for compat, now redundant but harmless)
+            s = self._re_o_hour_rano.sub(self._o_hour_rano_repl, s)
+            s = self._re_hour_rano.sub(self._hour_rano_repl, s)
 
         # protect geographic "na północ/południe" (south/north) – keep as words
         # only convert time midnight/noon when not geographic
@@ -499,43 +530,51 @@ class PolishTimeNormalizer:
             _geo_map[key] = m.group(0)
             return key
 
-        # geographic prepositions + północ/południe should stay (include ASCII variants and declensions via Morfeusz)
-        # need to protect both midnight forms
-        # we use two regexes but need to protect combined: first try polnoc then poludnie
-        s = self._re_geo_polnoc.sub(_protect_geo, s)
-        s = self._re_geo_poludnie.sub(_protect_geo, s)
-        # fallback legacy pattern (covers simple "na północ" if Morfeusz forms miss)
-        s = re.sub(
-            r"\b(na|z|od|do|ku|kierunek|strona|część|czesc|północno|polnocno|południowo|poludniowo)\s+(północ|polnoc|południe|poludnie)\b",
-            _protect_geo,
-            s,
-        )
-        # convert midnight/noon: contextual prep+form and standalone nominative; bare declined like "północy" stays word
-        # protect redundant time phrases like "12:00 w południe" / "0:00 o północy"
-        s = re.sub(r"\b(?:12:00|12)\s+w\s+(?:południe|poludnie)\b", _protect_geo, s)
-        s = re.sub(
-            r"\b(?:0:00|24:00|0|24)\s+(?:o\s+)?(?:północy|polnocy|północ|polnoc)\b",
-            _protect_geo,
-            s,
-        )
-        s = self._re_polnoc_context.sub(lambda m: f"{m.group(1)} 0:00", s)
-        s = self._re_poludnie_context.sub(lambda m: f"{m.group(1)} 12:00", s)
-        s = self._re_polnoc_nominative.sub("0:00", s)
-        s = self._re_poludnie_nominative.sub("12:00", s)
-        for k, v in _geo_map.items():
-            s = s.replace(k, v)
-        s = self._re_za.sub(self._za_repl, s)
-        s = self._re_po.sub(self._po_repl, s)
-        s = self._re_godzina_min.sub(self._godzina_min_repl, s)
-        s = self._re_godzina.sub(self._godzina_repl, s)
-        s = self._re_hour_min.sub(self._hour_min_repl, s)
-        s = self._re_hour_gen_min.sub(self._hour_gen_min_repl, s)
-        s = self._re_o_hour.sub(self._o_hour_repl, s)
-        s = self._re_o_hour_gen_ord_min.sub(self._o_hour_gen_ord_min_repl, s)
-        s = self._re_o_digit_hour.sub(self._o_digit_hour_repl, s)
-        s = self._re_za_minut.sub(self._za_repl, s)
-        s = self._re_po_minut.sub(self._po_repl, s)
-        s = self._re_range.sub(self._range_repl, s)
+        if has_midnight_word:
+            # geographic prepositions + północ/południe should stay (include ASCII variants and declensions via Morfeusz)
+            # need to protect both midnight forms
+            # we use two regexes but need to protect combined: first try polnoc then poludnie
+            s = self._re_geo_polnoc.sub(_protect_geo, s)
+            s = self._re_geo_poludnie.sub(_protect_geo, s)
+            # fallback legacy pattern (covers simple "na północ" if Morfeusz forms miss)
+            s = re.sub(
+                r"\b(na|z|od|do|ku|kierunek|strona|część|czesc|północno|polnocno|południowo|poludniowo)\s+(północ|polnoc|południe|poludnie)\b",
+                _protect_geo,
+                s,
+            )
+            # convert midnight/noon: contextual prep+form and standalone nominative; bare declined like "północy" stays word
+            # protect redundant time phrases like "12:00 w południe" / "0:00 o północy"
+            s = re.sub(r"\b(?:12:00|12)\s+w\s+(?:południe|poludnie)\b", _protect_geo, s)
+            s = re.sub(
+                r"\b(?:0:00|24:00|0|24)\s+(?:o\s+)?(?:północy|polnocy|północ|polnoc)\b",
+                _protect_geo,
+                s,
+            )
+            s = self._re_polnoc_context.sub(lambda m: f"{m.group(1)} 0:00", s)
+            s = self._re_poludnie_context.sub(lambda m: f"{m.group(1)} 12:00", s)
+            s = self._re_polnoc_nominative.sub("0:00", s)
+            s = self._re_poludnie_nominative.sub("12:00", s)
+            for k, v in _geo_map.items():
+                s = s.replace(k, v)
+        if "za" in s and has_time_word:
+            s = self._re_za.sub(self._za_repl, s)
+        if "po" in s and has_time_word:
+            s = self._re_po.sub(self._po_repl, s)
+        if "godzina" in s and has_time_word:
+            s = self._re_godzina_min.sub(self._godzina_min_repl, s)
+            s = self._re_godzina.sub(self._godzina_repl, s)
+        if has_time_word:
+            s = self._re_hour_min.sub(self._hour_min_repl, s)
+            s = self._re_hour_gen_min.sub(self._hour_gen_min_repl, s)
+            s = self._re_o_hour.sub(self._o_hour_repl, s)
+            s = self._re_o_hour_gen_ord_min.sub(self._o_hour_gen_ord_min_repl, s)
+        if has_digit:
+            s = self._re_o_digit_hour.sub(self._o_digit_hour_repl, s)
+        if "minut" in s:
+            s = self._re_za_minut.sub(self._za_repl, s)
+            s = self._re_po_minut.sub(self._po_repl, s)
+        if has_time_word and "od" in s and "do" in s:
+            s = self._re_range.sub(self._range_repl, s)
         return s
 
     def _za_repl(self, m: re.Match[str]) -> str:

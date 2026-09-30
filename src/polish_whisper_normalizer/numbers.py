@@ -17,6 +17,7 @@ from fractions import Fraction
 
 from .lemmatizer import PolishLemmatizer
 from .utils import (
+    contains_digit,
     normalize_vulgar_fractions,
     strip_diacritics,
     with_ascii_variants,
@@ -812,25 +813,35 @@ class PolishNumberNormalizer:
     def preprocess(self, s: str) -> str:
         s = self._FORMAT_RE.sub("", s)  # invisible formatting chars (10)
         s = normalize_vulgar_fractions(s)
+        # perf: guards are necessary conditions — skipping never changes output
         # join hyphenated compound words with prefixes "pół-", "ćwierć-":
         # "pół-finał" -> "półfinał", "ćwierć-finał" -> "ćwierćfinał", "pół-żartem" -> "półżartem"
-        s = re.sub(r"\b(pół|pol|ćwierć|cwierc)-\s*([a-ząćęłńóśźż]+)\b", r"\1\2", s)
+        if "-" in s:
+            s = re.sub(r"\b(pół|pol|ćwierć|cwierc)-\s*([a-ząćęłńóśźż]+)\b", r"\1\2", s)
         # ellipsis marks a sentence boundary: keep the boundary (so adjacent
         # spelled-out numbers are not merged) but drop the "." later
-        s = re.sub(r"(?:\s*\.){2,}\s*|\s*…\s*", " . ", s)
+        if "." in s or "…" in s:
+            s = re.sub(r"(?:\s*\.){2,}\s*|\s*…\s*", " . ", s)
         # "i pół" -> "przecinek pięć" (two and a half -> 2.5) – also ASCII "pol"
-        s = re.sub(r"\bi\s+(?:pół|pol)\b(?!-)", "przecinek pięć", s)
-        s = re.sub(r"\b(?:półtora|poltora)\b(?!-[a-ząćęłńóśźż])", "jeden przecinek pięć", s)
-        s = re.sub(r"\b(?:półtorej|poltorej)\b(?!-[a-ząćęłńóśźż])", "jeden przecinek pięć", s)
+        if "ół" in s or "pol" in s:
+            s = re.sub(r"\bi\s+(?:pół|pol)\b(?!-)", "przecinek pięć", s)
+        if "półtora" in s or "poltora" in s:
+            s = re.sub(r"\b(?:półtora|poltora)\b(?!-[a-ząćęłńóśźż])", "jeden przecinek pięć", s)
+        if "półtorej" in s or "poltorej" in s:
+            s = re.sub(r"\b(?:półtorej|poltorej)\b(?!-[a-ząćęłńóśźż])", "jeden przecinek pięć", s)
         # standalone "pół" (half) -> "0.5"
         # Protect hyphenated compound words (e.g. "pół-finał", "pół-żartem", "pół-serio")
-        s = re.sub(r"(?<!-)\b(?:pół|pol)\b(?!-[a-ząćęłńóśźż])", "zero przecinek pięć", s)
+        if "ół" in s or "pol" in s:
+            s = re.sub(r"(?<!-)\b(?:pół|pol)\b(?!-[a-ząćęłńóśźż])", "zero przecinek pięć", s)
         # quarter: "ćwierć" (one quarter) -> "0.25", "i ćwierć" -> "+0.25"
         # (ASCII "cwierc" for diacritic-less ASR). Only singular nominative;
         # plural "ćwierci" stays a word (like "zerowych").
         # Protect hyphenated compounds (e.g. "ćwierć-finał")
-        s = re.sub(r"\bi\s+(?:ćwierć|cwierc)\b(?!-)", "przecinek dwa pięć", s)
-        s = re.sub(r"(?<!-)\b(?:ćwierć|cwierc)\b(?!-[a-ząćęłńóśźż])", "zero przecinek dwa pięć", s)
+        if "ćwierć" in s or "cwierc" in s:
+            s = re.sub(r"\bi\s+(?:ćwierć|cwierc)\b(?!-)", "przecinek dwa pięć", s)
+            s = re.sub(
+                r"(?<!-)\b(?:ćwierć|cwierc)\b(?!-[a-ząćęłńóśźż])", "zero przecinek dwa pięć", s
+            )
 
         # normalize currency symbols to follow the amount ("€10" -> "10 €",
         # "10€" -> "10 €", "$1.50" -> "1.50 $").
@@ -842,12 +853,14 @@ class PolishNumberNormalizer:
                 return m.group(0)
             return f"{m.group(2)} {m.group(1)}"
 
-        s = re.sub(r"([€$£¢])\s*(\d+(?:\.\d+)?)", _currency_prefix_repl, s)
-        s = re.sub(r"(\d+(?:\.\d+)?)\s*([€$£¢])", r"\1 \2", s)
+        if "€" in s or "$" in s or "£" in s or "¢" in s:
+            s = re.sub(r"([€$£¢])\s*(\d+(?:\.\d+)?)", _currency_prefix_repl, s)
+            s = re.sub(r"(\d+(?:\.\d+)?)\s*([€$£¢])", r"\1 \2", s)
 
         # put a space at number/letter boundary
-        s = re.sub(r"([^\W\d_])([0-9])", r"\1 \2", s)
-        s = re.sub(r"([0-9])([^\W\d_])", r"\1 \2", s)
+        if contains_digit(s):
+            s = re.sub(r"([^\W\d_])([0-9])", r"\1 \2", s)
+            s = re.sub(r"([0-9])([^\W\d_])", r"\1 \2", s)
 
         return s
 
@@ -891,7 +904,7 @@ class PolishNumberNormalizer:
                 return m.group(0)
             return dec
 
-        s = re.sub(r"\b(\d+)\s+i\s+(\d+)/(\d+)\b", _decimal_repl, s)
+        s = re.sub(r"\b(\d+)\s+i\s+(\d+)/(\d+)\b", _decimal_repl, s) if "/" in s else s
 
         def _standalone_frac_repl(m: re.Match[str]) -> str:
             num = int(m.group(1))
@@ -901,21 +914,26 @@ class PolishNumberNormalizer:
                 return m.group(0)
             return dec
 
-        s = re.sub(r"\b(\d+)/(\d+)\b", _standalone_frac_repl, s)
+        if "/" in s:
+            s = re.sub(r"\b(\d+)/(\d+)\b", _standalone_frac_repl, s)
         # Normalize signed zero ("-0", "+0", "-0.0" -> "0"): negative zero
         # equals zero and otherwise breaks WER convergence ("minus zero").
-        s = re.sub(r"(?<![\d.:/-])([+-])0+(?:\.0+)?(?![\d.:/-])", "0", s)
+        if "-0" in s or "+0" in s:
+            s = re.sub(r"(?<![\d.:/-])([+-])0+(?:\.0+)?(?![\d.:/-])", "0", s)
         # Strip leading zeros for idempotency ("007" -> "7", "005" -> "5"):
         # word-form "zero zero siedem" glues to "007" on pass 1 but digit
         # "007" goes via Fraction to 7, so N(N(x)) != N(x) (bug 6a).
         # Preserve dates (05.05, 05.05.2026, 2026-05-05, 5/5/2026) and times
         # (0:00, 12:00): no stripping adjacent to ".", ":", "-", "/".
-        s = re.sub(r"(?<![\d.:/-])([+-]?)0+(\d)(?![\d.:/-])", r"\1\2", s)
+        if "0" in s and contains_digit(s):
+            s = re.sub(r"(?<![\d.:/-])([+-]?)0+(\d)(?![\d.:/-])", r"\1\2", s)
         # Collapse "00" alone -> "0" (e.g. "00" from "zero zero").
-        s = re.sub(r"(?<![\d.:/-])([+-]?)0{2,}(?![\d.:/-])", r"\g<1>0", s)
+        if "00" in s:
+            s = re.sub(r"(?<![\d.:/-])([+-]?)0{2,}(?![\d.:/-])", r"\g<1>0", s)
         # Normalize time hours ("00:00" -> "0:00", "07:05" -> "7:05")
         # to converge with word-form times ("0:00", "7:05"); minutes stay padded.
-        s = re.sub(r"\b0+(\d+:\d{2})\b", r"\1", s)
+        if "0" in s and ":" in s:
+            s = re.sub(r"\b0+(\d+:\d{2})\b", r"\1", s)
         return s
 
     def _fraction_denominator(self, word: str) -> int | None:

@@ -6,6 +6,7 @@ Keeps diacritic handling in one place so normalizers don't duplicate logic.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from .basic import remove_symbols_and_diacritics
@@ -14,6 +15,31 @@ from .basic import remove_symbols_and_diacritics
 def strip_diacritics(word: str) -> str:
     """ASCII-fold a single word (like remove_symbols_and_diacritics but without adding spaces)."""
     return remove_symbols_and_diacritics(word)
+
+
+_HAS_DIGIT_RE = re.compile(r"\d")
+
+
+def contains_digit(s: str) -> bool:
+    """C-level digit check to skip digit-dependent regexes (perf guard)."""
+    return _HAS_DIGIT_RE.search(s) is not None
+
+
+def sub_if_present(
+    s: str,
+    pattern: re.Pattern[str],
+    repl: str | Callable[[re.Match[str]], str],
+    *needles: str,
+) -> str:
+    """Apply ``pattern.sub`` only if a needle literal is present (perf guard).
+
+    Every needle must be a *necessary* condition: if none is in ``s`` the
+    pattern cannot match and the scan is skipped. Never changes output.
+    """
+    for needle in needles:
+        if needle in s:
+            return pattern.sub(repl, s)
+    return s
 
 
 def with_ascii_variants(mapping: dict[str, Any]) -> dict[str, Any]:

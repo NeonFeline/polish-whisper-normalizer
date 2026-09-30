@@ -10,6 +10,7 @@
 - Reconcile `tys./mln/mld` (`50 tys. → 50000`), `kilometr* → km`, percent adjectives (`20-procentowy`, `dwudziestoprocentowy → 20%`) (13, 14).
 - Keep `pół żartem/pół serio` idioms as words; partitive `jedną/jeden z …` stays a word while `jedną unię → 1 unię` (15, 16).
 - Consistent hyphens (`omega-3 → omega 3`, `70-te → 70`, `70-latek → 70 latek`); leading `-10` kept (17).
+- Perf: skip no-op regex scans via literal/digit guards (`sub_if_present`, `contains_digit`); ~1.6x faster (0.265 → 0.161 ms/call), output unchanged.
 
 ## 0.1.4 – 2026-09-07
 
